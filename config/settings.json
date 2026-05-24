@@ -1,0 +1,16 @@
+{
+    "store_root": "./.store",
+    "overlay": {
+        "edge": "right",
+        "size_ratio": 0.4,
+        "width": 24
+    },
+    "parse_timeout": 30,
+    "log_level": "INFO",
+    "notify": {
+        "batch_window_ms": 2000,
+        "silent_threshold": 5
+    },
+    "hotkey": "control+shift+space",
+    "dev_mode": true
+}

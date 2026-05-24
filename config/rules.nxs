@@ -1,0 +1,286 @@
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                  Cairn 规则文件 rules.nxs                    ║
+// ║                                                              ║
+// ║  优先级说明：数字越小越先执行                                  ║
+// ║  同名字段多次出现：OR                                          ║
+// ║  不同字段之间：AND                                             ║
+// ║  stop：命中后不再匹配后续规则                                  ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+
+// ================================================================
+// § 0  系统垃圾 — 最高优先级，直接丢弃，不污染索引
+// ================================================================
+
+rule "系统垃圾文件".5 (filename == (
+    "Thumbs.db",
+    "desktop.ini",
+    ".DS_Store",
+    ".localized",
+    "hiberfil.sys",
+    "pagefile.sys",
+    "swapfile.sys"
+)) => {
+    tag "trash"
+    stop
+}
+
+rule "临时文件".5 (ext == ("tmp", "temp", "cache", "bak", "old", "orig")) => {
+    tag "temporary"
+    store
+    stop
+}
+
+rule "空文件".5 (size == 0b) => {
+    tag "empty"
+    store
+    stop
+}
+
+
+// ================================================================
+// § 1  代码文件
+// ================================================================
+
+rule "Python 源码".10 (ext == ("py", "pyi", "pyw")) => {
+    tag "code", "python"
+    store
+    stop
+}
+
+rule "Web 前端".11 (ext == ("js", "ts", "jsx", "tsx", "vue", "svelte")) => {
+    tag "code", "web"
+    store
+    stop
+}
+
+rule "Web 其他".11 (ext typeof "web") => {
+    tag "code", "web"
+    store
+    stop
+}
+
+
+rule "系统与底层".12 (ext == ("c", "h", "cpp", "hpp", "rs", "go", "asm")) => {
+    tag "code", "system"
+    store
+    stop
+}
+
+rule "脚本与自动化".13 (ext == ("sh", "bash", "zsh", "bat", "ps1", "psm1")) => {
+    tag "code", "script"
+    store
+    stop
+}
+
+rule "其他代码".14 (ext typeof "code") => {
+    tag "code"
+    store
+    stop
+}
+
+
+// ================================================================
+// § 2  文档与笔记
+// ================================================================
+
+rule "Markdown 笔记".20 (ext == "md") => {
+    tag "note", "markdown"
+    store
+    stop
+}
+
+rule "纯文本".21 (ext == ("txt", "rst", "org")) => {
+    tag "note", "text"
+    store
+    stop
+}
+
+rule "PDF 文献".22 (ext == "pdf") => {
+    tag "document", "pdf"
+    store
+    stop
+}
+
+rule "Office 文档".23 (ext == ("doc", "docx", "odt", "rtf")) => {
+    tag "document", "office"
+    store
+    stop
+}
+
+rule "电子表格".24 (ext == ("xls", "xlsx", "ods", "csv")) => {
+    tag "document", "spreadsheet"
+    store
+    stop
+}
+
+rule "演示文稿".25 (ext == ("ppt", "pptx", "odp", "key")) => {
+    tag "document", "presentation"
+    store
+    stop
+}
+
+rule "电子书".26 (ext == ("epub", "mobi", "azw3", "djvu")) => {
+    tag "document", "ebook"
+    store
+    stop
+}
+
+rule "其他文档".27 (ext typeof "document") => {
+    tag "document"
+    store
+    stop
+}
+
+// ================================================================
+// § 3  配置与数据
+// ================================================================
+
+rule "配置文件".30 (ext == ("json", "toml", "yaml", "yml", "ini", "cfg", "conf", "env")) => {
+    tag "config", "data"
+    store
+    stop
+}
+
+rule "数据文件".30 (ext == ("xml", "sqlite", "db", "parquet", "feather", "arrow")) => {
+    tag "data"
+    store
+    stop
+}
+
+rule "日志文件".30 (ext == ("log", "out", "err")) => {
+    tag "log"
+    store
+    stop
+}
+
+rule "证书与密钥".30 (ext typeof "certificate_secure") => {
+    tag "certificate_secure"
+    store
+    stop
+}
+
+rule "其他数据文件".30 (ext typeof "data") => {
+    tag "data", "database"
+    store
+    stop
+}
+
+rule "数据库结构定义".30 (ext typeof "database_schema") => {
+    tag "database_schema", "database"
+    store
+    stop
+}
+
+rule "其他文本文件".31 (ext typeof "text") => {
+    tag "text"
+    store
+    stop
+}
+
+// ================================================================
+// § 4  图像
+// ================================================================
+
+rule "截图".40 (ext typeof "image", filename ~ ("screenshot", "截图", "capture", "screen_")) => {
+    tag "image", "screenshot"
+    store
+    stop
+}
+
+rule "图片".41 (ext typeof "image") => {
+    tag "image"
+    store
+    stop
+}
+
+
+// ================================================================
+// § 5  音视频
+// ================================================================
+
+rule "视频".50 (ext typeof "video") => {
+    tag "video"
+    store
+    stop
+}
+
+rule "音频".51 (ext typeof "audio") => {
+    tag "audio"
+    store
+    stop
+}
+
+rule "音乐制作".51 (ext typeof "music_composition") => {
+    tag "audio", "music_composition"
+    store
+    stop
+}
+
+// ================================================================
+// § 6  压缩包与二进制
+// ================================================================
+
+rule "压缩包".60 (ext typeof "archive") => {
+    tag "archive"
+    store
+    stop
+}
+
+rule "可执行文件".61 (ext == ("exe", "msi", "dll", "so", "dylib", "bin", "apk")) => {
+    tag "binary", "can_run"
+    store
+    stop
+}
+
+
+// ================================================================
+// § 7  网络与链接
+// ================================================================
+
+rule "网页链接".70 (ext == ("url", "webloc", "lnk")) => {
+    tag "link"
+    store
+    stop
+}
+
+rule "网页存档".71 (ext == ("html", "htm", "mhtml", "mht")) => {
+    tag "webpage"
+    store
+    stop
+}
+
+
+// ================================================================
+// § 8  体积异常预警（不 stop，叠加标签后继续匹配上方规则）
+// ================================================================
+
+rule "超大文件预警".3 (size > 500mb) => {
+    tag "oversized"
+}
+
+rule "过小文件存疑".4 (size sizebetween (0b, 10b)) => {
+    tag "suspicious"
+}
+
+
+// ================================================================
+// § 9  时间归档（不 stop，叠加标签后继续匹配上方规则）
+// ================================================================
+
+rule "历史文件".2 (modified before "2020-01-01") => {
+    tag "legacy"
+}
+
+
+// ================================================================
+// § 99  兜底规则 — 兜住所有漏网之鱼
+//        优先级最低，保证预警标签（§8/§9）能叠加生效
+//        保证每一个文件至少有一个标签，保证基于标签搜索的可查找性
+// ================================================================
+
+rule "未分类文件".999 (size > 0b) => {
+    tag "uncategorized"
+    store
+    stop
+}

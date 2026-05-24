@@ -1,0 +1,94 @@
+# coding=utf-8
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional
+from sqlmodel import SQLModel, Field, Relationship
+
+
+class FileTagLink(SQLModel, table=True):
+    """文件-标签多对多关联表"""
+    __tablename__ = "file_tags"
+
+    file_id: int = Field(foreign_key="files.id", primary_key=True)
+    tag_id: int = Field(foreign_key="tags.id", primary_key=True)
+
+
+class Tag(SQLModel, table=True):
+    __tablename__ = "tags"
+
+    id: int = Field(default=None, primary_key=True)  # SQLModel 自动处理 AUTOINCREMENT
+    name: str = Field(unique=True, index=True)
+
+    files: list["File"] = Relationship(
+        back_populates="tags", link_model=FileTagLink
+    )
+
+
+class File(SQLModel, table=True):
+    """文件索引主表"""
+    __tablename__ = "files"
+
+    id: int = Field(default=None, primary_key=True)
+    path: str = Field(unique=True, index=True)
+    origin_path: Optional[str] = None
+    filename: str = Field(index=True)
+    ext: str = ""
+    size: int = 0
+    content: Optional[str] = None
+    summary: Optional[str] = None
+    features: Optional[str] = None
+    comment: str = ""  # 用户注释
+    indexed_at: datetime = Field(default_factory=datetime.now)
+    modified_at: Optional[datetime] = None
+    file_hash: Optional[str] = None
+    is_folder: bool = False
+    folder_id: Optional[int] = Field(default=None, foreign_key="files.id")
+    tags: list[Tag] = Relationship(
+        back_populates="files", link_model=FileTagLink
+    )
+    ref_count: int = Field(default=1)
+
+
+@dataclass
+class FileDTO:
+    """File 的纯数据传输对象，Session 关闭后安全传递。"""
+    id: int
+    path: str
+    origin_path: str | None
+    filename: str
+    ext: str
+    size: int
+    content: str | None
+    summary: str | None
+    features: str | None
+    comment: str
+    indexed_at: datetime | None
+    modified_at: datetime | None
+    file_hash: str | None
+    is_folder: bool
+    folder_id: int | None
+    tags: list[str] = field(default_factory=list)
+    ref_count: int = 1
+
+    @classmethod
+    def from_orm(cls, file: File) -> "FileDTO":
+        """在 Session 内调用，将 ORM 对象转为 DTO"""
+        return cls(
+            id=file.id,
+            path=file.origin_path or file.path,
+            origin_path=file.origin_path,
+            filename=file.filename,
+            ext=file.ext,
+            size=file.size,
+            content=file.content,
+            summary=file.summary,
+            features=file.features,
+            comment=file.comment,
+            indexed_at=file.indexed_at,
+            modified_at=file.modified_at,
+            file_hash=file.file_hash,
+            is_folder=file.is_folder,
+            folder_id=file.folder_id,
+            tags=[t.name for t in file.tags],
+            ref_count=file.ref_count,
+        )
