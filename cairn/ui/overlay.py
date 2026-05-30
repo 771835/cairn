@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 class DropOverlay(QWidget):
     """
     屏幕边缘透明拖放接收区。
-    唯一的文件输入入口，可行性已验证。
+    唯一的文件输入入口。
 
     发出信号：
         files_dropped(list[str])  接收到的文件路径列表

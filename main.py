@@ -37,6 +37,7 @@ def main():
     overlay.files_dropped.connect(dispatcher.dispatch)
     overlay.folders_dropped.connect(popup.popup)
 
+
     def on_folder_choice(folders: list[Path], mode: str):
         for folder in folders:
             if mode == "expand":

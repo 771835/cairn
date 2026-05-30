@@ -4,7 +4,7 @@ from pathlib import Path
 from dataclasses import dataclass
 
 CONFIG_PATH = Path("config/settings.json")
-
+DB_PATH = Path("data/cairn.db")
 
 @dataclass
 class NotifyConfig:

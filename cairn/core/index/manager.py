@@ -7,14 +7,13 @@ from pathlib import Path
 
 from sqlmodel import Session, SQLModel, create_engine, select, text, col
 
+from cairn.core.config import DB_PATH
 from cairn.core.index.models import File, Tag, FileTagLink, FileDTO
 from cairn.core.index.search import SearchEngine, SearchQuery, SearchResult
 from cairn.core.parser.base import ParseResult
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-DB_PATH = Path("data/cairn.db")
 
 _FTS5_STATEMENTS = [
     """
@@ -81,8 +80,8 @@ class IndexManager:
         )
 
         with self._engine.connect() as conn:
-            conn.execute(text("PRAGMA journal_mode=WAL"))
-            conn.execute(text("PRAGMA foreign_keys=ON"))
+            conn.execute(text("PRAGMA journal_mode=WAL"))  # 将 SQLite 的日志模式设置为 WAL
+            conn.execute(text("PRAGMA foreign_keys=ON"))  # 开启 SQLite 的 外键约束
             conn.commit()
 
         SQLModel.metadata.create_all(self._engine)
@@ -100,6 +99,11 @@ class IndexManager:
             for stmt in _FTS5_STATEMENTS:
                 conn.execute(text(stmt.strip()))
             conn.commit()
+
+    @property
+    def engine(self):
+        """暴露数据库引擎，供外部只读访问。"""
+        return self._engine
 
     # ── 写入 ──────────────────────────────────────────────────
 
@@ -427,8 +431,6 @@ class IndexManager:
         from cairn.core.store import FileStore
         return FileStore().get_path(file_hash)
 
-
-
     def update_comment(self, file_id: int, comment: str) -> None:
         """更新文件注释"""
         with Session(self._engine) as session:
@@ -443,6 +445,26 @@ class IndexManager:
         """全量替换文件标签"""
         with Session(self._engine) as session:
             self._sync_tags(session, file_id, tags)
+
+    def update_file_meta(
+            self,
+            file_id: int,
+            summary: str | None = None,
+            origin_path: str | None = None,
+            modified_at: datetime | None = None,
+            indexed_at: datetime | None = None,
+    ) -> None:
+        """批量更新文件元信息。"""
+        with Session(self._engine) as session:
+            file = session.get(File, file_id)
+            if not file:
+                return
+            if summary is not None: file.summary = summary
+            if origin_path is not None: file.origin_path = origin_path
+            if modified_at is not None: file.modified_at = modified_at
+            if indexed_at is not None: file.indexed_at = indexed_at
+            session.add(file)
+            session.commit()
 
     def delete_from_index(
             self,

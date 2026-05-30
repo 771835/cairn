@@ -7,6 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from PySide6 import QtCore
 from PySide6.QtCore import (
     Qt, QTimer, Signal, QThread, QObject, QEvent,
     QMimeData, QUrl, QPoint, QModelIndex, QAbstractListModel, QSize
@@ -25,6 +26,7 @@ from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
 from cairn.core.index.search import SearchQuery, SearchResult
 from cairn.ui.file_list_mixin import FileListMixin
+from cairn.utils.fmt_tools import format_detail
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -298,6 +300,7 @@ class FileItemDelegate(QStyledItemDelegate):
         )
         painter.restore()
 
+
 # ── 各视图 Tab ────────────────────────────────────────────────
 
 class SearchTab(QWidget, FileListMixin):
@@ -420,7 +423,7 @@ class SearchTab(QWidget, FileListMixin):
         if not isinstance(current, ResultItem):
             self._detail.setText("")
             return
-        self._detail.setText(_format_detail(current.dto, current.snippet))
+        self._detail.setText(format_detail(current.dto, current.snippet))
 
     def _open_current(self) -> None:
         """打开当前选中文件。"""
@@ -444,6 +447,22 @@ class SearchTab(QWidget, FileListMixin):
     def refresh(self) -> None:
         """刷新搜索结果"""
         self._do_search()
+
+    def _remove_dtos_from_view(self, dtos: list[FileDTO]) -> None:
+        """直接从列表移除条目，不重新搜索。"""
+        ids = {d.id for d in dtos}
+        for row in range(self._list.count() - 1, -1, -1):
+            item = self._list.item(row)
+            if isinstance(item, ResultItem) and item.dto.id in ids:
+                self._list.takeItem(row)
+        count = self._list.count()
+        self._status.setText(f"{count} 个结果")
+
+    def _on_item_updated(self, dto: FileDTO) -> None:
+        """条目数据更新后，若该条目当前选中则刷新详情栏。"""
+        current = self._list.currentItem()
+        if isinstance(current, ResultItem) and current.dto.id == dto.id:
+            self._detail.setText(format_detail(dto, current.snippet))
 
 
 class FolderTab(QWidget, FileListMixin):
@@ -555,6 +574,20 @@ class FolderTab(QWidget, FileListMixin):
     def refresh(self) -> None:
         """刷新文件夹树。"""
         self.load()
+
+    def _remove_dtos_from_view(self, dtos: list[FileDTO]) -> None:
+        """从右侧文件列表移除条目，目录树不动。"""
+        ids = {d.id for d in dtos}
+        for row in range(self._file_list.count() - 1, -1, -1):
+            item = self._file_list.item(row)
+            if isinstance(item, ResultItem) and item.dto.id in ids:
+                self._file_list.takeItem(row)
+
+    def _on_item_updated(self, dto: FileDTO) -> None:
+        """条目数据更新后，刷新选中条目的详情栏。"""
+        current = self._file_list.currentItem()
+        if isinstance(current, ResultItem) and current.dto.id == dto.id:
+            self._detail.setText(format_detail(dto))
 
 
 class TagTab(QWidget, FileListMixin):
@@ -701,13 +734,50 @@ class TagTab(QWidget, FileListMixin):
         """更新底部详情。"""
         dto = self._model.get_dto(current)
         if dto:
-            self._detail.setText(_format_detail(dto))
+            self._detail.setText(format_detail(dto))
 
     def _open_item(self, index: QModelIndex) -> None:
         """双击打开文件。"""
         dto = self._model.get_dto(index)
         if dto:
             _open_file(dto)
+
+    def _refresh_tag_list(self) -> None:
+        """仅刷新左侧标签列表，保留当前选中的标签。"""
+        # 记住当前选中的标签名
+        current_item = self._tag_list.currentItem()
+        current_tag = (
+            current_item.data(Qt.ItemDataRole.UserRole)
+            if current_item else None
+        )
+
+        self._worker = BrowseWorker()
+        self._thread = QThread(self)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.load_tags)
+        self._worker.tag_list_ready.connect(
+            lambda tags: self._rebuild_tag_list(tags, current_tag)
+        )
+        self._worker.tag_list_ready.connect(self._thread.quit)
+        self._thread.start()
+
+    def _rebuild_tag_list(
+            self,
+            tags: list[tuple[str, int]],
+            restore_tag: str | None,
+    ) -> None:
+        """重建标签列表并恢复选中状态。"""
+        self._tag_list.clear()
+        restore_row = 0
+        for i, (name, count) in enumerate(tags):
+            item = QListWidgetItem(f"#{name}  ({count})")
+            item.setData(Qt.ItemDataRole.UserRole, name)
+            self._tag_list.addItem(item)
+            if name == restore_tag:
+                restore_row = i
+
+        if self._tag_list.count() > 0:
+            self._tag_list.setCurrentRow(restore_row)
 
     def _get_selected_dtos(self) -> list[FileDTO | None]:
         """返回当前选中条目的 DTO 列表。"""
@@ -721,8 +791,47 @@ class TagTab(QWidget, FileListMixin):
         """刷新标签列表。"""
         self.load()
 
+    def _remove_dtos_from_view(self, dtos: list[FileDTO]) -> None:
+        """从虚拟列表移除条目，标签选中不变。"""
+        ids = {d.id for d in dtos}
+        # 同步更新 _all_files 缓存
+        self._all_files = [f for f in self._all_files if f.id not in ids]
 
-class TimelineTab(QWidget,FileListMixin):
+        # 找出需要移除的 model 行（倒序移除避免下标偏移）
+        rows_to_remove = [
+            row for row in range(self._model.rowCount())
+            if (dto := self._model.get_dto(
+                self._model.index(row)
+            )) is not None and dto.id in ids
+        ]
+        for row in sorted(rows_to_remove, reverse=True):
+            self._model.beginRemoveRows(
+                QtCore.QModelIndex(), row, row
+            )
+            self._model._items.pop(row)  # NOQA
+            self._model.endRemoveRows()
+
+        self._status.setText(f"共 {len(self._all_files)} 个文件")
+
+    def _on_item_updated(self, dto: FileDTO) -> None:
+        """
+        条目标签变化后：
+        1. 刷新详情栏
+        2. 异步刷新左侧标签列表计数
+        """
+        # 详情栏
+        indexes = self._file_view.selectedIndexes()
+        for idx in indexes:
+            d = self._model.get_dto(idx)
+            if d is not None and d.id == dto.id:
+                self._detail.setText(format_detail(dto))
+                break
+
+        # 只刷标签列表，不动文件列表
+        self._refresh_tag_list()
+
+
+class TimelineTab(QWidget, FileListMixin):
     """时间线视图。"""
 
     def __init__(self) -> None:
@@ -801,6 +910,37 @@ class TimelineTab(QWidget,FileListMixin):
         """刷新时间线。"""
         self.load()
 
+    def _remove_dtos_from_view(self, dtos: list[FileDTO]) -> None:
+        """移除时间线叶节点，更新分组计数。"""
+        ids = {d.id for d in dtos}
+        root = self._tree.invisibleRootItem()
+
+        for g in range(root.childCount()):
+            group_item = root.child(g)
+            if group_item is None:
+                continue
+
+            # 倒序移除子节点
+            for c in range(group_item.childCount() - 1, -1, -1):
+                child = group_item.child(c)
+                if child is None:
+                    continue
+                dto = child.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(dto, FileDTO) and dto.id in ids:
+                    group_item.removeChild(child)
+
+            # 更新分组标题计数
+            remaining = group_item.childCount()
+            name = group_item.text(0).split("  ")[0]
+            group_item.setText(0, f"{name}  ({remaining})")
+
+    def _on_item_updated(self, dto: FileDTO) -> None:
+        """条目数据更新后刷新详情栏。"""
+        current = self._tree.currentItem()
+        if current is not None:
+            d = current.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(d, FileDTO) and d.id == dto.id:
+                self._detail.setText(format_detail(dto))
 
 # ── 主窗口 ────────────────────────────────────────────────────
 
@@ -925,24 +1065,6 @@ def _parse_query(raw: str) -> SearchQuery:
             words.append(token)
 
     return SearchQuery(text=" ".join(words), tags=tags, ext=exts, limit=30)
-
-
-def _format_detail(dto: FileDTO, snippet: str = "") -> str:
-    """格式化文件详情文本。"""
-    mtime = dto.modified_at.strftime("%Y-%m-%d %H:%M") if dto.modified_at else "未知"
-    size = _fmt_size(dto.size)
-    tags = " ".join(f"#{t}" for t in dto.tags)
-    clean = snippet.replace("<b>", "").replace("</b>", "")[:80] if snippet else \
-        (dto.comment or dto.summary or "")[:80]
-    return f"{dto.path}\n修改：{mtime}  大小：{size}  {tags}\n{clean}"
-
-
-def _fmt_size(size: int) -> str:
-    """字节数格式化。"""
-    for unit, t in [("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)]:
-        if size >= t:
-            return f"{size / t:.1f} {unit}"
-    return f"{size} B"
 
 
 # ── 样式常量 ──────────────────────────────────────────────────

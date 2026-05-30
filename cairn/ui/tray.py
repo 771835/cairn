@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction
 
 from cairn.core.config import config
 from cairn.ui.notifier import BatchNotifier
+from cairn.ui.stats_dialog import StatsDialog
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -44,6 +45,10 @@ class CairnTray(QSystemTrayIcon):
         search_action = QAction("搜索知识库  Ctrl+Shift+Space", menu)
         search_action.triggered.connect(self.open_search)
         menu.addAction(search_action)
+
+        stats_action = QAction("知识库统计…", menu)
+        stats_action.triggered.connect(lambda: StatsDialog().exec())
+        menu.addAction(stats_action)
 
         cleanup_action = QAction("存储整理…", menu)
         cleanup_action.triggered.connect(self._open_cleanup)
