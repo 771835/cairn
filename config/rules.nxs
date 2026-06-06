@@ -1,79 +1,583 @@
 // ╔══════════════════════════════════════════════════════════════╗
 // ║                  Cairn 规则文件 rules.nxs                    ║
 // ║                                                              ║
-// ║  优先级说明：数字越小越先执行                                  ║
-// ║  同名字段多次出现：OR                                          ║
+// ║  工作流：叠加标签 → 垃圾过滤 → 类型分类收集                    ║
+// ║                                                              ║
+// ║  优先级阶段：                                                  ║
+// ║    1x  横切标签（叠加，无 stop）                               ║
+// ║    2x  垃圾过滤（stop，不收集）                                ║
+// ║    3x  类型分类（store + stop）                                ║
+// ║    999 兜底收集                                                ║
+// ║                                                              ║
+// ║  同优先级规则同时参与匹配                                       ║
+// ║  同名字段多次出现：OR                                           ║
 // ║  不同字段之间：AND                                             ║
 // ║  stop：命中后不再匹配后续规则                                  ║
 // ╚══════════════════════════════════════════════════════════════╝
 
 
 // ================================================================
-// § 0  系统垃圾 — 最高优先级，直接丢弃，不污染索引
+// § 1  横切标签 — 叠加，不 stop，先于类型规则执行
 // ================================================================
 
-rule "系统垃圾文件".5 (filename == (
-    "Thumbs.db",
-    "desktop.ini",
-    ".DS_Store",
-    ".localized",
-    "hiberfil.sys",
-    "pagefile.sys",
-    "swapfile.sys"
+rule "历史文件".10 (modified before "2020-01-01") => {
+    tag "legacy"
+}
+
+rule "超大文件".11 (size > 500mb) => {
+    tag "oversized"
+}
+
+rule "微小文件".11 (size sizebetween (1b, 10b)) => {
+    tag "suspicious"
+}
+
+
+// ================================================================
+// § 2  垃圾过滤 — 命中即 stop，不收集
+// ================================================================
+
+rule "系统垃圾".20 (filename == (
+    "Thumbs.db", "desktop.ini",
+    ".DS_Store", ".localized",
+    "hiberfil.sys", "pagefile.sys", "swapfile.sys"
 )) => {
     tag "trash"
     stop
 }
 
-rule "临时文件".5 (ext == ("tmp", "temp", "cache", "bak", "old", "orig")) => {
-    tag "temporary"
-    store
+rule "临时文件".20 (ext == ("tmp", "temp", "cache", "bak", "old", "orig")) => {
+    tag "trash"
     stop
 }
 
-rule "空文件".5 (size == 0b) => {
+rule "空文件".20 (size == 0b) => {
     tag "empty"
+    stop
+}
+
+
+// ================================================================
+// § 3  特殊文件名 — 项目元信息、依赖、工程配置
+//      优先于通用类型规则，保证精确命中
+// ================================================================
+
+// ── 开源协议 ──────────────────────────────────────────────────
+
+rule "开源协议".30 (filename == (
+    "LICENSE", "LICENSE.md", "LICENSE.txt",
+    "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-GPL",
+    "COPYING", "COPYING.md", "COPYING.txt",
+    "NOTICE", "NOTICE.md", "NOTICE.txt"
+)) => {
+    tag "meta", "license"
+    store
+    stop
+}
+
+// ── 项目说明 ──────────────────────────────────────────────────
+
+rule "项目说明".30 (filename == (
+    "README", "README.md", "README.txt", "README.rst",
+    "README_EN.md", "README_CN.md", "README_ZH.md",
+    "README-zh.md", "README-en.md"
+)) => {
+    tag "meta", "readme"
+    store
+    stop
+}
+
+rule "变更日志".30 (filename == (
+    "CHANGELOG", "CHANGELOG.md", "CHANGELOG.txt", "CHANGELOG.rst",
+    "CHANGES", "CHANGES.md", "HISTORY", "HISTORY.md",
+    "RELEASE_NOTES", "RELEASE_NOTES.md", "RELEASENOTES.md"
+)) => {
+    tag "meta", "changelog"
+    store
+    stop
+}
+
+rule "贡献者信息".30 (filename == (
+    "AUTHORS", "AUTHORS.md", "AUTHORS.txt",
+    "CONTRIBUTORS", "CONTRIBUTORS.md",
+    "MAINTAINERS", "MAINTAINERS.md",
+    "CODEOWNERS"
+)) => {
+    tag "meta", "contributors"
+    store
+    stop
+}
+
+rule "项目行为准则".30 (filename == (
+    "CODE_OF_CONDUCT", "CODE_OF_CONDUCT.md",
+    "CONDUCT.md"
+)) => {
+    tag "meta", "conduct"
+    store
+    stop
+}
+
+rule "安全说明".30 (filename == (
+    "SECURITY", "SECURITY.md", "SECURITY.txt",
+    "VULNERABILITY.md"
+)) => {
+    tag "meta", "security"
+    store
+    stop
+}
+
+rule "项目路线图".30 (filename == (
+    "ROADMAP", "ROADMAP.md",
+    "TODO", "TODO.md", "TODO.txt"
+)) => {
+    tag "meta", "roadmap"
+    store
+    stop
+}
+
+// ── Python 依赖与包管理 ───────────────────────────────────────
+
+rule "Python 依赖".31 (filename == (
+    "requirements.txt", "requirements-dev.txt",
+    "requirements-test.txt", "requirements-prod.txt",
+    "constraints.txt"
+)) => {
+    tag "dependency", "python"
+    store
+    stop
+}
+
+rule "Python 包配置".31 (filename == (
+    "pyproject.toml", "setup.py", "setup.cfg",
+    "Pipfile", "Pipfile.lock",
+    "poetry.lock", "pdm.lock",
+    "MANIFEST.in", "tox.ini"
+)) => {
+    tag "project-config", "python"
+    store
+    stop
+}
+
+// ── JavaScript / Node 依赖 ────────────────────────────────────
+
+rule "Node 依赖".31 (filename == (
+    "package.json", "package-lock.json",
+    "yarn.lock", "pnpm-lock.yaml",
+    "bun.lockb", ".npmrc", ".yarnrc", ".yarnrc.yml"
+)) => {
+    tag "dependency", "javascript"
+    store
+    stop
+}
+
+rule "Node 项目配置".31 (filename == (
+    "tsconfig.json", "tsconfig.base.json",
+    "jsconfig.json", "babel.config.js", "babel.config.json",
+    ".babelrc", "webpack.config.js", "vite.config.ts",
+    "vite.config.js", "rollup.config.js", "esbuild.config.js",
+    "jest.config.js", "jest.config.ts", "vitest.config.ts"
+)) => {
+    tag "project-config", "javascript"
+    store
+    stop
+}
+
+// ── Rust ──────────────────────────────────────────────────────
+
+rule "Rust 包管理".31 (filename == (
+    "Cargo.toml", "Cargo.lock"
+)) => {
+    tag "dependency", "rust"
+    store
+    stop
+}
+
+// ── Go ────────────────────────────────────────────────────────
+
+rule "Go 模块".31 (filename == (
+    "go.mod", "go.sum", "go.work", "go.work.sum"
+)) => {
+    tag "dependency", "go"
+    store
+    stop
+}
+
+// ── Java / JVM ────────────────────────────────────────────────
+
+rule "Java 构建".31 (filename == (
+    "pom.xml", "build.gradle", "build.gradle.kts",
+    "settings.gradle", "settings.gradle.kts",
+    "gradle.properties", "gradlew", "gradlew.bat",
+    "mvnw", "mvnw.cmd", ".mvn"
+)) => {
+    tag "dependency", "java"
+    store
+    stop
+}
+
+// ── C / C++ ───────────────────────────────────────────────────
+
+rule "C 构建".31 (filename == (
+    "CMakeLists.txt", "Makefile", "makefile",
+    "GNUmakefile", "configure", "configure.ac",
+    "meson.build", "meson_options.txt", "Doxyfile"
+)) => {
+    tag "project-config", "c"
+    store
+    stop
+}
+
+rule "C 构建脚本".31 (ext == "cmake") => {
+    tag "project-config", "c"
+    store
+    stop
+}
+
+// ── Ruby ──────────────────────────────────────────────────────
+
+rule "Ruby 依赖".31 (filename == (
+    "Gemfile", "Gemfile.lock", "Rakefile",
+    ".ruby-version"
+)) => {
+    tag "dependency", "ruby"
+    store
+    stop
+}
+
+// ── PHP ───────────────────────────────────────────────────────
+
+rule "PHP 依赖".31 (filename == (
+    "composer.json", "composer.lock"
+)) => {
+    tag "dependency", "php"
+    store
+    stop
+}
+
+// ── .NET ──────────────────────────────────────────────────────
+
+rule ".NET 项目".31 (ext == ("csproj", "vbproj", "fsproj", "sln", "props", "targets")) => {
+    tag "project-config", "dotnet"
+    store
+    stop
+}
+
+rule "NuGet 配置".31 (filename == (
+    "NuGet.Config", "nuget.config",
+    "packages.config", "Directory.Build.props"
+)) => {
+    tag "dependency", "dotnet"
+    store
+    stop
+}
+
+// ── Swift / Apple ─────────────────────────────────────────────
+
+rule "Swift 包管理".31 (filename == (
+    "Package.swift", "Package.resolved",
+    "Podfile", "Podfile.lock", "Cartfile"
+)) => {
+    tag "dependency", "swift"
+    store
+    stop
+}
+
+rule "Xcode 项目".31 (ext == ("xcodeproj", "xcworkspace", "xcconfig")) => {
+    tag "project-config", "swift"
+    store
+    stop
+}
+
+// ── Docker 与容器 ─────────────────────────────────────────────
+
+rule "Dockerfile".32 (filename ~ ("Dockerfile", "Containerfile")) => {
+    tag "devops", "docker"
+    store
+    stop
+}
+
+rule "Docker Compose".32 (filename == (
+    "docker-compose.yml", "docker-compose.yaml",
+    "docker-compose.override.yml",
+    "compose.yml", "compose.yaml"
+)) => {
+    tag "devops", "docker"
+    store
+    stop
+}
+
+rule ".dockerignore".32 (filename == ".dockerignore") => {
+    tag "devops", "docker"
+    store
+    stop
+}
+
+// ── CI/CD ─────────────────────────────────────────────────────
+
+rule "GitHub Actions".32 (filename ~ ".github") => {
+    tag "devops", "ci", "github"
+    store
+    stop
+}
+
+rule "GitLab CI".32 (filename == ".gitlab-ci.yml") => {
+    tag "devops", "ci", "gitlab"
+    store
+    stop
+}
+
+rule "Jenkins".32 (filename == ("Jenkinsfile", "jenkins.yml")) => {
+    tag "devops", "ci", "jenkins"
+    store
+    stop
+}
+
+rule "CircleCI".32 (filename ~ "circleci") => {
+    tag "devops", "ci"
+    store
+    stop
+}
+
+rule "Travis CI".32 (filename == ".travis.yml") => {
+    tag "devops", "ci"
+    store
+    stop
+}
+
+rule "Azure Pipelines".32 (filename == (
+    "azure-pipelines.yml", "azure-pipelines.yaml"
+)) => {
+    tag "devops", "ci", "azure"
+    store
+    stop
+}
+
+// ── Git 与版本控制 ────────────────────────────────────────────
+
+rule "Git 配置".32 (filename == (
+    ".gitignore", ".gitattributes", ".gitmodules",
+    ".gitkeep", ".git-blame-ignore-revs"
+)) => {
+    tag "vcs", "git"
+    store
+    stop
+}
+
+rule "版本控制其他".32 (filename == (
+    ".hgignore", ".svnignore", ".p4ignore"
+)) => {
+    tag "vcs"
+    store
+    stop
+}
+
+// ── 编辑器与 IDE 配置 ─────────────────────────────────────────
+
+rule "EditorConfig".33 (filename == ".editorconfig") => {
+    tag "project-config", "editor"
+    store
+    stop
+}
+
+rule "VSCode 配置".33 (filename ~ ".vscode") => {
+    tag "project-config", "vscode"
+    store
+    stop
+}
+
+rule "JetBrains 配置".33 (filename ~ (".idea", ".iml")) => {
+    tag "project-config", "jetbrains"
+    store
+    stop
+}
+
+rule "Vim 配置".33 (filename == (
+    ".vimrc", ".nvimrc", "init.vim", "init.lua",
+    ".vim"
+)) => {
+    tag "project-config", "editor"
+    store
+    stop
+}
+
+// ── 代码质量与格式化 ──────────────────────────────────────────
+
+rule "代码格式化配置".33 (filename == (
+    ".prettierrc", ".prettierrc.js", ".prettierrc.json",
+    ".prettierrc.yml", ".prettierignore",
+    ".eslintrc", ".eslintrc.js", ".eslintrc.json",
+    ".eslintrc.yml", ".eslintignore",
+    ".stylelintrc", ".stylelintrc.json",
+    "pylintrc", ".pylintrc", ".flake8",
+    ".ruff.toml", "ruff.toml",
+    ".black", "pycodestyle.cfg",
+    ".clang-format", ".clang-tidy"
+)) => {
+    tag "project-config", "lint"
+    store
+    stop
+}
+
+rule "提交规范".33 (filename == (
+    ".commitlintrc", ".commitlintrc.js",
+    ".commitlintrc.json", "commitlint.config.js",
+    ".czrc", ".cz-config.js"
+)) => {
+    tag "project-config", "git"
+    store
+    stop
+}
+
+// ── 环境与密钥 ────────────────────────────────────────────────
+
+rule "环境变量模板".33 (filename == (
+    ".env.example", ".env.sample",
+    ".env.template", ".env.defaults"
+)) => {
+    tag "config", "env-template"
+    store
+    stop
+}
+
+rule "环境变量".33 (filename == (
+    ".env", ".env.local", ".env.development",
+    ".env.production", ".env.test", ".env.staging"
+)) => {
+    tag "config", "env", "sensitive"
+    store
+    stop
+}
+
+// ── 文档工具 ──────────────────────────────────────────────────
+
+rule "文档配置".33 (filename == (
+    "mkdocs.yml", "mkdocs.yaml",
+    "docusaurus.config.js", "docusaurus.config.ts",
+    "_config.yml", "_config.yaml",
+    "conf.py", "book.toml",
+    "antora.yml", "antora-playbook.yml"
+)) => {
+    tag "project-config", "docs"
+    store
+    stop
+}
+
+rule "API 规范".33 (filename ~ ("openapi", "swagger")) => {
+    tag "document", "api-spec"
+    store
+    stop
+}
+
+// ── 基础设施即代码 ────────────────────────────────────────────
+
+rule "Terraform".34 (ext == ("tf", "tfvars", "tfstate")) => {
+    tag "devops", "terraform", "iac"
+    store
+    stop
+}
+
+rule "Ansible".34 (filename ~ ("playbook", "ansible")) => {
+    tag "devops", "ansible", "iac"
+    store
+    stop
+}
+
+rule "Kubernetes".34 (filename ~ ("k8s", "kubernetes", "kustomization", "helm")) => {
+    tag "devops", "kubernetes", "iac"
+    store
+    stop
+}
+
+rule "Nginx 配置".34 (filename ~ "nginx") => {
+    tag "devops", "nginx"
     store
     stop
 }
 
 
 // ================================================================
-// § 1  代码文件
+// § 4  代码文件（通用扩展名）
 // ================================================================
 
-rule "Python 源码".10 (ext == ("py", "pyi", "pyw")) => {
+rule "Python 源码".40 (ext == ("py", "pyi", "pyw")) => {
     tag "code", "python"
     store
     stop
 }
 
-rule "Web 前端".11 (ext == ("js", "ts", "jsx", "tsx", "vue", "svelte")) => {
+rule "Web 脚本".40 (ext == ("js", "ts", "jsx", "tsx", "vue", "svelte")) => {
+    tag "code", "web", "javascript"
+    store
+    stop
+}
+
+rule "Web 其他".40 (ext typeof "web") => {
     tag "code", "web"
     store
     stop
 }
 
-rule "Web 其他".11 (ext typeof "web") => {
-    tag "code", "web"
+rule "系统与底层".40 (ext == ("c", "h", "cpp", "hpp")) => {
+    tag "code", "system", "c"
     store
     stop
 }
 
-
-rule "系统与底层".12 (ext == ("c", "h", "cpp", "hpp", "rs", "go", "asm")) => {
-    tag "code", "system"
+rule "Rust 源码".40 (ext == "rs") => {
+    tag "code", "system", "rust"
     store
     stop
 }
 
-rule "脚本与自动化".13 (ext == ("sh", "bash", "zsh", "bat", "ps1", "psm1")) => {
+rule "Go 源码".40 (ext == "go") => {
+    tag "code", "system", "go"
+    store
+    stop
+}
+
+rule "Java 源码".40 (ext == ("java", "kt", "kts", "scala", "groovy")) => {
+    tag "code", "java"
+    store
+    stop
+}
+
+rule "C# 源码".40 (ext == ("cs", "fs", "vb")) => {
+    tag "code", "dotnet"
+    store
+    stop
+}
+
+rule "Swift 源码".40 (ext == ("swift", "m", "mm")) => {
+    tag "code", "swift"
+    store
+    stop
+}
+
+rule "Ruby 源码".40 (ext == ("rb", "rake", "gemspec")) => {
+    tag "code", "ruby"
+    store
+    stop
+}
+
+rule "PHP 源码".40 (ext == "php") => {
+    tag "code", "php"
+    store
+    stop
+}
+
+rule "脚本与自动化".40 (ext == ("sh", "bash", "zsh", "bat", "ps1", "psm1")) => {
     tag "code", "script"
     store
     stop
 }
 
-rule "其他代码".14 (ext typeof "code") => {
+rule "汇编".40 (ext == ("asm", "s", "nasm")) => {
+    tag "code", "system", "asm"
+    store
+    stop
+}
+
+rule "其他代码".41 (ext typeof "code") => {
     tag "code"
     store
     stop
@@ -81,114 +585,116 @@ rule "其他代码".14 (ext typeof "code") => {
 
 
 // ================================================================
-// § 2  文档与笔记
+// § 5  文档与笔记
 // ================================================================
 
-rule "Markdown 笔记".20 (ext == "md") => {
+rule "Markdown".50 (ext == "md") => {
     tag "note", "markdown"
     store
     stop
 }
 
-rule "纯文本".21 (ext == ("txt", "rst", "org")) => {
+rule "纯文本".50 (ext == ("txt", "rst", "org")) => {
     tag "note", "text"
     store
     stop
 }
 
-rule "PDF 文献".22 (ext == "pdf") => {
+rule "PDF".50 (ext == "pdf") => {
     tag "document", "pdf"
     store
     stop
 }
 
-rule "Office 文档".23 (ext == ("doc", "docx", "odt", "rtf")) => {
+rule "Office 文档".50 (ext == ("doc", "docx", "odt", "rtf")) => {
     tag "document", "office"
     store
     stop
 }
 
-rule "电子表格".24 (ext == ("xls", "xlsx", "ods", "csv")) => {
+rule "电子表格".50 (ext == ("xls", "xlsx", "ods", "csv")) => {
     tag "document", "spreadsheet"
     store
     stop
 }
 
-rule "演示文稿".25 (ext == ("ppt", "pptx", "odp", "key")) => {
+rule "演示文稿".50 (ext == ("ppt", "pptx", "odp", "key")) => {
     tag "document", "presentation"
     store
     stop
 }
 
-rule "电子书".26 (ext == ("epub", "mobi", "azw3", "djvu")) => {
+rule "电子书".50 (ext == ("epub", "mobi", "azw3", "djvu")) => {
     tag "document", "ebook"
     store
     stop
 }
 
-rule "其他文档".27 (ext typeof "document") => {
+rule "其他文档".51 (ext typeof "document") => {
     tag "document"
     store
     stop
 }
 
+
 // ================================================================
-// § 3  配置与数据
+// § 6  配置与数据
 // ================================================================
 
-rule "配置文件".30 (ext == ("json", "toml", "yaml", "yml", "ini", "cfg", "conf", "env")) => {
-    tag "config", "data"
+rule "配置文件".60 (ext == ("json", "toml", "yaml", "yml", "ini", "cfg", "conf", "env")) => {
+    tag "config"
     store
     stop
 }
 
-rule "数据文件".30 (ext == ("xml", "sqlite", "db", "parquet", "feather", "arrow")) => {
+rule "数据文件".60 (ext == ("xml", "sqlite", "db", "parquet", "feather", "arrow")) => {
     tag "data"
     store
     stop
 }
 
-rule "日志文件".30 (ext == ("log", "out", "err")) => {
+rule "日志文件".60 (ext == ("log", "out", "err")) => {
     tag "log"
     store
     stop
 }
 
-rule "证书与密钥".30 (ext typeof "certificate_secure") => {
-    tag "certificate_secure"
+rule "证书与密钥".60 (ext typeof "certificate_secure") => {
+    tag "certificate_secure", "sensitive"
     store
     stop
 }
 
-rule "其他数据文件".30 (ext typeof "data") => {
-    tag "data", "database"
-    store
-    stop
-}
-
-rule "数据库结构定义".30 (ext typeof "database_schema") => {
+rule "数据库结构定义".60 (ext typeof "database_schema") => {
     tag "database_schema", "database"
     store
     stop
 }
 
-rule "其他文本文件".31 (ext typeof "text") => {
+rule "其他数据".61 (ext typeof "data") => {
+    tag "data"
+    store
+    stop
+}
+
+rule "其他文本".61 (ext typeof "text") => {
     tag "text"
     store
     stop
 }
 
+
 // ================================================================
-// § 4  图像
+// § 7  图像
 // ================================================================
 
-rule "截图".40 (ext typeof "image", filename ~ ("screenshot", "截图", "capture", "screen_")) => {
+rule "截图".70 (ext typeof "image", filename ~ ("screenshot", "截图", "capture", "screen_")) => {
     tag "image", "screenshot"
     store
     stop
 }
 
-rule "图片".41 (ext typeof "image") => {
+rule "图片".70 (ext typeof "image") => {
     tag "image"
     store
     stop
@@ -196,55 +702,51 @@ rule "图片".41 (ext typeof "image") => {
 
 
 // ================================================================
-// § 5  音视频
+// § 8  音视频
 // ================================================================
 
-rule "视频".50 (ext typeof "video") => {
+rule "视频".80 (ext typeof "video") => {
     tag "video"
     store
     stop
 }
 
-rule "音频".51 (ext typeof "audio") => {
+rule "音频".80 (ext typeof "audio") => {
     tag "audio"
     store
     stop
 }
 
-rule "音乐制作".51 (ext typeof "music_composition") => {
+rule "音乐制作".80 (ext typeof "music_composition") => {
     tag "audio", "music_composition"
     store
     stop
 }
 
+
 // ================================================================
-// § 6  压缩包与二进制
+// § 9  压缩包、二进制、网络
 // ================================================================
 
-rule "压缩包".60 (ext typeof "archive") => {
+rule "压缩包".90 (ext typeof "archive") => {
     tag "archive"
     store
     stop
 }
 
-rule "可执行文件".61 (ext == ("exe", "msi", "dll", "so", "dylib", "bin", "apk")) => {
-    tag "binary", "can_run"
+rule "可执行文件".90 (ext == ("exe", "msi", "dll", "so", "dylib", "bin", "apk")) => {
+    tag "binary", "executable"
     store
     stop
 }
 
-
-// ================================================================
-// § 7  网络与链接
-// ================================================================
-
-rule "网页链接".70 (ext == ("url", "webloc", "lnk")) => {
+rule "网页链接".90 (ext == ("url", "webloc", "lnk")) => {
     tag "link"
     store
     stop
 }
 
-rule "网页存档".71 (ext == ("html", "htm", "mhtml", "mht")) => {
+rule "网页存档".90 (ext == ("html", "htm", "mhtml", "mht")) => {
     tag "webpage"
     store
     stop
@@ -252,34 +754,10 @@ rule "网页存档".71 (ext == ("html", "htm", "mhtml", "mht")) => {
 
 
 // ================================================================
-// § 8  体积异常预警（不 stop，叠加标签后继续匹配上方规则）
+// § 999  兜底收集
 // ================================================================
 
-rule "超大文件预警".3 (size > 500mb) => {
-    tag "oversized"
-}
-
-rule "过小文件存疑".4 (size sizebetween (0b, 10b)) => {
-    tag "suspicious"
-}
-
-
-// ================================================================
-// § 9  时间归档（不 stop，叠加标签后继续匹配上方规则）
-// ================================================================
-
-rule "历史文件".2 (modified before "2020-01-01") => {
-    tag "legacy"
-}
-
-
-// ================================================================
-// § 99  兜底规则 — 兜住所有漏网之鱼
-//        优先级最低，保证预警标签（§8/§9）能叠加生效
-//        保证每一个文件至少有一个标签，保证基于标签搜索的可查找性
-// ================================================================
-
-rule "未分类文件".999 (size > 0b) => {
+rule "未分类".999 (size > 0b) => {
     tag "uncategorized"
     store
     stop

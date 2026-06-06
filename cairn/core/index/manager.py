@@ -15,6 +15,8 @@ from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+_index_lock = threading.Lock()
+
 _FTS5_STATEMENTS = [
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
@@ -110,56 +112,86 @@ class IndexManager:
     def index_file(
             self,
             result: ParseResult,
-            folder_id: int | None = None,
             original_path: Path | None = None,
-    ) -> int:
-        """写入或更新单个文件索引，返回 file_id。"""
-        summary = (result.content or "")[:300]
-        features = json.dumps(result.metadata, ensure_ascii=False)
-        mtime = self._get_mtime(original_path or result.raw_path)
+    ) -> int | None:
+        """
+        将解析结果写入索引。
+        唯一性约束：origin_path，同来源路径不重复写入。
+        同哈希不同来源：共享物理文件，各自建独立记录。
+        """
+        origin = str(original_path or result.raw_path)
+        store_path = str(result.raw_path)
 
-        # filename 和 origin_path 优先用原始值
-        origin = original_path or result.raw_path
-        display_name = origin.name  # 始终是原始文件名
+        with _index_lock:
+            with Session(self._engine) as session:
+                try:
+                    # ── 按 origin_path 判断是否已索引过 ──────────
+                    existing_origin = session.exec(
+                        select(File).where(
+                            col(File.origin_path) == origin
+                        )
+                    ).first()
 
-        with Session(self._engine) as session:
-            file = session.exec(
-                select(File).where(File.path == str(result.raw_path))
-            ).first()
+                    if existing_origin is not None:
+                        logger.info(
+                            f"已索引，跳过：{result.filename}"
+                        )
+                        return existing_origin.id
 
-            if file is None:
-                file = File(
-                    path=str(result.raw_path.resolve()),  # 哈希路径（物理位置）
-                    origin_path=str(origin.resolve()),  # 原始路径（来源记录）
-                    filename=display_name,  # 原始文件名（显示用）
-                    ext=result.ext,
-                    size=result.size,
-                    content=result.content,
-                    summary=summary,
-                    features=features,
-                    modified_at=mtime,
-                    file_hash=result.file_hash,
-                    folder_id=folder_id,
-                )
-            else:
-                file.filename = display_name
-                file.origin_path = str(origin)
-                file.ext = result.ext
-                file.size = result.size
-                file.content = result.content
-                file.summary = summary
-                file.features = features
-                file.modified_at = mtime
-                file.file_hash = result.file_hash
-                file.indexed_at = datetime.now()
-                file.folder_id = folder_id
+                    # ── 查同哈希是否已有物理文件，有则 ref_count+1 ─
+                    existing_hash = session.exec(
+                        select(File).where(
+                            col(File.file_hash) == result.file_hash
+                        ).limit(1)
+                    ).first()
 
-            session.add(file)
-            session.commit()
-            session.refresh(file)
-            self._sync_tags(session, file.id, result.tags)
-            logger.debug(f"已索引：{display_name} (id={file.id})")
-            return file.id
+                    if existing_hash is not None:
+                        existing_hash.ref_count += 1
+                        session.add(existing_hash)
+
+                    # ── 无论是否共享，都建新记录 ──────────────────
+                    new_file = File(
+                        path=store_path,
+                        origin_path=origin,
+                        filename=result.filename,
+                        ext=result.ext,
+                        size=result.size,
+                        content=result.content,
+                        summary=result.metadata.get("summary", ""),
+                        features=json.dumps(
+                            result.metadata, ensure_ascii=False
+                        ),
+                        comment="",
+                        indexed_at=datetime.now(),
+                        modified_at=self._get_mtime(Path(origin)),
+                        file_hash=result.file_hash,
+                        is_folder=False,
+                        ref_count=1,
+                    )
+                    session.add(new_file)
+                    session.commit()
+                    session.refresh(new_file)
+                    self._sync_tags(session, new_file.id, result.tags)
+
+                    if existing_hash is not None:
+                        logger.info(
+                            f"共享物理文件：{result.filename} "
+                            f"← {result.file_hash[:12]}..."
+                        )
+                    else:
+                        logger.info(
+                            f"已写入：{result.filename} "
+                            f"| {result.file_hash[:12]}..."
+                        )
+                    return new_file.id
+
+                except Exception as e:
+                    session.rollback()
+                    logger.error(
+                        f"写入索引失败（物理文件已保留）："
+                        f"{result.filename} — {e}"
+                    )
+                    return None
 
     def index_folder(
             self,
@@ -644,25 +676,54 @@ class IndexManager:
 
     def _migrate(self) -> None:
         """检查并补全缺失的列，向前兼容旧数据库。"""
+        from sqlalchemy import inspect as sa_inspect, text
+
+        inspector = sa_inspect(self._engine)
+
+        # 补列
         migrations = [
             ("files", "comment", "TEXT NOT NULL DEFAULT ''"),
             ("files", "ref_count", "INTEGER NOT NULL DEFAULT 1"),
         ]
-
         with self._engine.connect() as conn:
             for table, column, definition in migrations:
-                # 查询现有列
-                existing = {
-                    row[1]
-                    for row in conn.execute(
-                        text(f"PRAGMA table_info({table})")
-                    ).fetchall()
-                }
+                existing = {c["name"] for c in inspector.get_columns(table)}
                 if column not in existing:
-                    conn.execute(text(
-                        f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
-                    ))
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table} "
+                            f"ADD COLUMN {column} {definition}"
+                        )
+                    )
                     logger.info(f"数据库迁移：{table}.{column} 已添加")
+
+            # 去掉 files.path 上的 UNIQUE 索引（如果存在）
+            indexes = {
+                idx["name"]
+                for idx in inspector.get_indexes("files")
+            }
+            if "ix_files_path" in indexes:
+                conn.execute(text("DROP INDEX IF EXISTS ix_files_path"))
+                # 重建为普通索引
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS "
+                        "ix_files_path ON files (path)"
+                    )
+                )
+                logger.info("数据库迁移：files.path UNIQUE 约束已移除")
+
+            # 确保 origin_path 有 UNIQUE 约束
+            if "uq_files_origin_path" not in indexes:
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS "
+                        "uq_files_origin_path ON files (origin_path) "
+                        "WHERE origin_path IS NOT NULL"
+                    )
+                )
+                logger.info("数据库迁移：uq_files_origin_path 已添加")
+
             conn.commit()
 
     def restore_file(

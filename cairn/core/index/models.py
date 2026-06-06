@@ -2,6 +2,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
+
+from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Relationship
 
 
@@ -27,9 +29,13 @@ class Tag(SQLModel, table=True):
 class File(SQLModel, table=True):
     """文件索引主表"""
     __tablename__ = "files"
+    __table_args__ = (
+        # 真正的唯一性：同一个来源路径不能重复索引
+        UniqueConstraint("origin_path", name="uq_files_origin_path"),
+    )
 
     id: int = Field(default=None, primary_key=True)
-    path: str = Field(unique=True, index=True)
+    path: str = Field(index=True)
     origin_path: Optional[str] = None
     filename: str = Field(index=True)
     ext: str = ""

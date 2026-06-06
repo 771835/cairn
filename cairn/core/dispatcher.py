@@ -1,9 +1,11 @@
 # coding=utf-8
+import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
+from cairn.core.index.manager import IndexManager
 from cairn.core.parser.base import ParseResult
 from cairn.core.parser.manager import ParserManager
 from cairn.core.rule_engine.engine import RuleEngine
@@ -12,6 +14,10 @@ from cairn.utils.logger import get_logger
 logger = get_logger(__name__)
 
 PARSE_TIMEOUT = 30  # 秒，超时后降级处理
+
+_MAX_RETRY = 3
+_RETRY_DELAY = 0.5  # 秒，每次翻倍
+
 
 
 class FileEventDispatcher(QObject):
@@ -85,13 +91,12 @@ class FileEventDispatcher(QObject):
             # 每个文件单独哈希入库
             try:
                 from cairn.core.store import FileStore
-                from cairn.core.index.manager import IndexManager
                 store = FileStore()
                 store_path, file_hash = store.store(result.raw_path)
                 original_path = result.raw_path
                 result.raw_path = store_path
                 result.file_hash = file_hash
-                file_id = IndexManager().index_file(
+                file_id = self._index_with_retry(
                     result, original_path=original_path
                 )
                 child_ids.append(file_id)
@@ -111,3 +116,40 @@ class FileEventDispatcher(QObject):
         except Exception as e:
             logger.exception(f"文件夹条目建立失败：{folder_path.name}")
             self.process_error.emit(f"文件夹索引失败：{folder_path.name}\n{e}")
+
+    def _index_with_retry(
+            self,
+            result: ParseResult,
+            original_path: Path | None = None,
+    ) -> int | None:
+        """
+        写入索引，失败时自动重试。
+        数据库锁（OperationalError）重试，其他错误直接放弃。
+        """
+        import sqlite3
+        from sqlalchemy.exc import OperationalError
+
+        delay = _RETRY_DELAY
+        for attempt in range(1, _MAX_RETRY + 1):
+            try:
+                return IndexManager().index_file(result, original_path)
+            except (OperationalError, sqlite3.OperationalError) as e:
+                # 数据库繁忙/锁，等待后重试
+                if attempt < _MAX_RETRY:
+                    logger.warning(
+                        f"数据库繁忙，{delay:.1f}s 后重试"
+                        f"（{attempt}/{_MAX_RETRY}）：{result.filename}"
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                else:
+                    logger.error(
+                        f"写入失败，已重试 {_MAX_RETRY} 次放弃："
+                        f"{result.filename} — {e}"
+                    )
+                    return None
+            except Exception as e:
+                # 其他错误（UNIQUE 已在 index_file 内部处理）直接记录
+                logger.error(f"写入失败：{result.filename} — {e}")
+                return None
+        return None
