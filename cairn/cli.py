@@ -205,7 +205,7 @@ def cmd_info(args: argparse.Namespace) -> None:
         print(f"摘要       {f.summary[:200]}")
 
 
-def cmd_stats(args: argparse.Namespace) -> None:
+def cmd_stats(_args: argparse.Namespace) -> None:
     """知识库统计概览。"""
     from sqlmodel import Session, select, func, col, case
     from cairn.core.index.models import File, Tag
@@ -215,27 +215,27 @@ def cmd_stats(args: argparse.Namespace) -> None:
 
         overview = session.exec(
             select(
-                func.sum(case((File.is_folder == False, 1), else_=0)),  # noqa: E712
-                func.sum(case((File.is_folder == True, 1), else_=0)),  # noqa: E712
+                func.sum(case((col(File.is_folder) == False, 1), else_=0)),
+                func.sum(case((col(File.is_folder) == True, 1), else_=0)),
                 func.coalesce(func.sum(File.size), 0),
             )
         ).one()
-        n_files = int(overview[0] or 0)
-        n_folders = int(overview[1] or 0)
-        n_size = int(overview[2] or 0)
+        n_files = int(overview[0] or 0)  # noqa
+        n_folders = int(overview[1] or 0)  # noqa
+        n_size = int(overview[2] or 0)  # noqa
 
-        n_tags = int(session.exec(select(func.count(Tag.id))).one() or 0)
+        n_tags = int(session.exec(select(func.count(Tag.id))).one() or 0)  # noqa
 
         ext_rows = session.exec(
             select(File.ext, func.count(File.id))
-            .where(col(File.is_folder) == False)  # noqa: E712
+            .where(col(File.is_folder) == False)
             .where(col(File.ext) != "")
             .group_by(col(File.ext))
             .order_by(func.count(File.id).desc())
             .limit(5)
         ).all()
 
-        recent = session.exec(
+        recent: File | None = session.exec(
             select(File).order_by(col(File.indexed_at).desc()).limit(1)
         ).first()
 
@@ -247,10 +247,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
 
     if ext_rows:
         print("\n  扩展名分布（前 5）")
-        max_c = max(int(r[1]) for r in ext_rows) or 1
+        max_c = max(int(r[1]) for r in ext_rows) or 1  # noqa
         for ext, count in ext_rows:
-            bar = "█" * int(20 * int(count) / max_c)
-            print(f"    .{str(ext):<10} {int(count):>6}  \033[34m{bar}\033[0m")
+            bar = "█" * int(20 * int(count) / max_c)  # noqa
+            print(f"    .{str(ext):<10} {int(count):>6}  \033[34m{bar}\033[0m")  # noqa
 
     if recent is not None:
         itime = _fmt_date(recent.indexed_at, "%Y-%m-%d %H:%M")
@@ -342,7 +342,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
         idx.delete_from_store(f.id)
         print(f"[OK] 已从知识库彻底删除：{f.filename}")
     else:
-        idx.delete_from_index(f.id)
+        idx.delete(f.id)
         print(f"[OK] 已从索引删除：{f.filename}")
 
 

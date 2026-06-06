@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QCursor
 
+from cairn.core.config import config
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
 from cairn.ui.file_context_menu import FileContextMenu
@@ -94,12 +95,13 @@ class FileListMixin:
             lambda: self._batch_save_as(dtos)
         )
         menu.addSeparator()
-        menu.addAction(f"🗑  从索引删除 {n} 个文件").triggered.connect(
+        menu.addAction(f"🗑  删除 {n} 个文件").triggered.connect(
             lambda: self._batch_delete_index(dtos)
         )
-        menu.addAction(f"⚠️  从知识库彻底删除 {n} 个文件").triggered.connect(
-            lambda: self._batch_delete_store(dtos)
-        )
+        if config.dev_mode:
+            menu.addAction(f"⚠️  [DEV] 从知识库彻底删除 {n} 个文件").triggered.connect(
+                lambda: self._batch_delete_store(dtos)
+            )
         menu.addAction(f"🏷  为 {n} 个文件批量添加标签…").triggered.connect(
             lambda: self._batch_add_tags(dtos)
         )
@@ -188,7 +190,7 @@ class FileListMixin:
         if reply != QMessageBox.StandardButton.Yes:
             return
         for dto in dtos:
-            IndexManager().delete_from_index(dto.id)
+            IndexManager().delete(dto.id)
         self._remove_dtos_from_view(dtos)
 
     def _batch_delete_store(self, dtos: list[FileDTO]) -> None:

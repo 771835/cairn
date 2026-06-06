@@ -11,14 +11,12 @@ from PySide6.QtWidgets import (
 )
 
 from cairn.core.index.manager import IndexManager
-from cairn.core.index.models import File, FileDTO
+from cairn.core.index.models import FileDTO
 from cairn.ui.widgets import TagEditor
 from cairn.utils.fmt_tools import format_size
 from cairn.utils.logger import get_logger
-from sqlmodel import Session
 
 logger = get_logger(__name__)
-
 
 
 def _to_qdatetime(dt: datetime | None) -> QDateTime:
@@ -82,21 +80,6 @@ class _EditField(QLineEdit):
             "background: #2b2b2b; color: #e0e0e0; "
             "border: 1px solid #555; border-radius: 4px; padding: 4px 8px;"
         )
-
-
-def _get_ref_count(file_id: int) -> int:
-    """
-    从数据库读取文件引用计数。
-    独立函数，不依赖 IndexManager 的私有成员。
-    """
-    try:
-        idx = IndexManager()
-        with Session(idx.engine) as session:
-            file = session.get(File, file_id)
-            return file.ref_count if file else 0
-    except Exception as e:
-        logger.warning(f"读取引用计数失败：{e}")
-        return 0
 
 
 class FileDetailDialog(QDialog):
@@ -255,7 +238,7 @@ class FileDetailDialog(QDialog):
             store_path = str(p) if p else "不存在"
 
         form.addRow("哈希", hash_widget)
-        form.addRow("引用数", _ReadOnlyField(str(_get_ref_count(self._dto.id))))
+        form.addRow("引用数", _ReadOnlyField(str(IndexManager().get_ref_count(self._dto.file_hash))))
         form.addRow("扩展名", _ReadOnlyField(self._dto.ext or "无"))
         form.addRow("大小", _ReadOnlyField(format_size(self._dto.size)))
         form.addRow("存储路径", _ReadOnlyField(store_path))

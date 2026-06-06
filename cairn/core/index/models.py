@@ -26,6 +26,12 @@ class Tag(SQLModel, table=True):
     )
 
 
+class HashFile(SQLModel, table=True):
+    __tablename__ = "hash_files"
+    file_hash: Optional[str] = Field(default=None, primary_key=True)
+    ref_count: int = Field(default=1)
+
+
 class File(SQLModel, table=True):
     """文件索引主表"""
     __tablename__ = "files"
@@ -52,7 +58,6 @@ class File(SQLModel, table=True):
     tags: list[Tag] = Relationship(
         back_populates="files", link_model=FileTagLink
     )
-    ref_count: int = Field(default=1)
 
 
 @dataclass
@@ -74,7 +79,6 @@ class FileDTO:
     is_folder: bool
     folder_id: int | None
     tags: list[str] = field(default_factory=list)
-    ref_count: int = 1
 
     @classmethod
     def from_orm(cls, file: File) -> "FileDTO":
@@ -96,5 +100,4 @@ class FileDTO:
             is_folder=file.is_folder,
             folder_id=file.folder_id,
             tags=[t.name for t in file.tags],
-            ref_count=file.ref_count,
         )

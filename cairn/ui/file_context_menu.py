@@ -57,8 +57,7 @@ class FileContextMenu(QMenu):
         self.addSeparator()
 
         # ── 删除 ──────────────────────────────────────────────
-        self.addAction("从索引删除").triggered.connect(self._delete_index)
-        self.addAction("从知识库彻底删除").triggered.connect(self._delete_store)
+        self.addAction("删除").triggered.connect(self._delete)
 
         if config.dev_mode:
             self.addSeparator()
@@ -110,20 +109,16 @@ class FileContextMenu(QMenu):
             self._dto.comment = comment
             self._notify_updated()
 
-    def _delete_index(self) -> None:
-        IndexManager().delete_from_index(self._dto.id)
-        self._notify_deleted()
-
-    def _delete_store(self) -> None:
-        IndexManager().delete_from_store(self._dto.id)
+    def _delete(self) -> None:
+        IndexManager().delete(self._dto.id)
         self._notify_deleted()
 
     def _dev_delete_index(self) -> None:
-        IndexManager().delete_from_index(self._dto.id, dev_mode=True)
+        IndexManager().delete(self._dto.id, dev_mode=True)
         self._notify_deleted()
 
     def _dev_delete_store(self) -> None:
-        IndexManager().delete_from_store(self._dto.id, dev_mode=True)
+        IndexManager().delete_from_store(self._dto.id)
         self._notify_deleted()
 
     def _restore(self) -> None:

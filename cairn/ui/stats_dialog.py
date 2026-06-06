@@ -1,5 +1,4 @@
 # coding=utf-8
-import threading
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
@@ -223,13 +222,11 @@ class StatsDialog(QDialog):
         return bar
 
     # ── 数据加载 ──────────────────────────────────────────────
-    cnt = 1
     def _load(self) -> None:
         """启动异步统计加载。"""
         if self._thread and self._thread.isRunning():
             return
-        print(self.cnt, threading.active_count())
-        self.cnt += 1
+
         self._progress.setVisible(True)
 
         self._worker = StatsWorker()

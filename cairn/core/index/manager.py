@@ -5,10 +5,11 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from sqlmodel import Session, SQLModel, create_engine, select, text, col
+from sqlalchemy.dialects.sqlite import insert
+from sqlmodel import Session, SQLModel, create_engine, select, text, col, update
 
 from cairn.core.config import DB_PATH
-from cairn.core.index.models import File, Tag, FileTagLink, FileDTO
+from cairn.core.index.models import File, Tag, FileTagLink, FileDTO, HashFile
 from cairn.core.index.search import SearchEngine, SearchQuery, SearchResult
 from cairn.core.parser.base import ParseResult
 from cairn.utils.logger import get_logger
@@ -52,7 +53,12 @@ _FTS5_STATEMENTS = [
 
 
 class IndexManager:
-    """索引管理器，单例。普通 CRUD 通过 SQLModel，FTS5 保留最小化 SQL。"""
+    """
+    索引管理器，单例。普通 CRUD 通过 SQLModel，FTS5 保留最小化 SQL。
+
+    See Also:
+        任何对数据库的访问应通过此管理器进行
+    """
 
     _instance: "IndexManager | None" = None
     _lock = threading.Lock()
@@ -116,8 +122,6 @@ class IndexManager:
     ) -> int | None:
         """
         将解析结果写入索引。
-        唯一性约束：origin_path，同来源路径不重复写入。
-        同哈希不同来源：共享物理文件，各自建独立记录。
         """
         origin = str(original_path or result.raw_path)
         store_path = str(result.raw_path)
@@ -125,31 +129,34 @@ class IndexManager:
         with _index_lock:
             with Session(self._engine) as session:
                 try:
-                    # ── 按 origin_path 判断是否已索引过 ──────────
-                    existing_origin = session.exec(
-                        select(File).where(
-                            col(File.origin_path) == origin
+
+                    stmt = (
+                        insert(HashFile)
+                        .values(file_hash=result.file_hash, ref_count=1)
+                        .on_conflict_do_update(
+                            index_elements=["file_hash"],  # 指定冲突的列（主键或唯一约束）
+                            set_=dict(ref_count=HashFile.ref_count + 1)  # 更新操作
                         )
-                    ).first()
+                    )
 
-                    if existing_origin is not None:
-                        logger.info(
-                            f"已索引，跳过：{result.filename}"
-                        )
-                        return existing_origin.id
+                    session.exec(stmt)
 
-                    # ── 查同哈希是否已有物理文件，有则 ref_count+1 ─
-                    existing_hash = session.exec(
-                        select(File).where(
-                            col(File.file_hash) == result.file_hash
-                        ).limit(1)
-                    ).first()
+                    #
+                    # # ── 按 origin_path 判断是否已索引过 ──────────
+                    #
+                    # existing_origin = session.exec(
+                    #     select(File).where(
+                    #         col(File.origin_path) == origin
+                    #     )
+                    # ).first()
+                    #
+                    # if existing_origin is not None:
+                    #     logger.info(
+                    #         f"已索引，跳过：{result.filename}"
+                    #     )
+                    #     return existing_origin.id
 
-                    if existing_hash is not None:
-                        existing_hash.ref_count += 1
-                        session.add(existing_hash)
-
-                    # ── 无论是否共享，都建新记录 ──────────────────
+                    # ── 无论是否已存在同哈希文件，都建新记录 ──────────────────
                     new_file = File(
                         path=store_path,
                         origin_path=origin,
@@ -165,30 +172,22 @@ class IndexManager:
                         indexed_at=datetime.now(),
                         modified_at=self._get_mtime(Path(origin)),
                         file_hash=result.file_hash,
-                        is_folder=False,
-                        ref_count=1,
+                        is_folder=False
                     )
                     session.add(new_file)
                     session.commit()
                     session.refresh(new_file)
                     self._sync_tags(session, new_file.id, result.tags)
 
-                    if existing_hash is not None:
-                        logger.info(
-                            f"共享物理文件：{result.filename} "
-                            f"← {result.file_hash[:12]}..."
-                        )
-                    else:
-                        logger.info(
-                            f"已写入：{result.filename} "
-                            f"| {result.file_hash[:12]}..."
-                        )
+                    logger.info(
+                        f"已写入：{result.filename} "
+                        f"| {result.file_hash[:12]}..."
+                    )
                     return new_file.id
-
                 except Exception as e:
                     session.rollback()
                     logger.error(
-                        f"写入索引失败（物理文件已保留）："
+                        f"写入索引失败："
                         f"{result.filename} — {e}"
                     )
                     return None
@@ -241,7 +240,7 @@ class IndexManager:
             folder_id = folder.id
 
         for result in child_results:
-            self.index_file(result, folder_id=folder_id)
+            self.index_file(result)
 
         logger.info(
             f"已整体索引文件夹：{folder_path.name}"
@@ -304,6 +303,43 @@ class IndexManager:
             self._sync_tags(session, folder.id, all_tags)
             return folder.id
 
+    # ── 更新 ──────────────────────────────────────────────────
+
+    def update_comment(self, file_id: int, comment: str) -> None:
+        """更新文件注释"""
+        with Session(self._engine) as session:
+            file = session.get(File, file_id)
+            if file:
+                file.comment = comment
+                file.indexed_at = datetime.now()
+                session.add(file)
+                session.commit()
+
+    def update_tags(self, file_id: int, tags: list[str]) -> None:
+        """全量替换文件标签"""
+        with Session(self._engine) as session:
+            self._sync_tags(session, file_id, tags)
+
+    def update_file_meta(
+            self,
+            file_id: int,
+            summary: str | None = None,
+            origin_path: str | None = None,
+            modified_at: datetime | None = None,
+            indexed_at: datetime | None = None,
+    ) -> None:
+        """批量更新文件元信息。"""
+        with Session(self._engine) as session:
+            file = session.get(File, file_id)
+            if not file:
+                return
+            if summary is not None: file.summary = summary
+            if origin_path is not None: file.origin_path = origin_path
+            if modified_at is not None: file.modified_at = modified_at
+            if indexed_at is not None: file.indexed_at = indexed_at
+            session.add(file)
+            session.commit()
+
     # ── 检索 ──────────────────────────────────────────────────
 
     def search(self, query: SearchQuery) -> list[SearchResult]:
@@ -341,7 +377,43 @@ class IndexManager:
                 )
             ).all())
 
+    # ── 读取 ──────────────────────────────────────────────────
+
+    def get_ref_count(self, file_hash: str | None) -> int:
+        try:
+            with Session(self._engine) as session:
+                hash_file = session.get(HashFile, file_hash)
+                return hash_file.ref_count if hash_file else 0
+        except Exception as e:
+            logger.warning(f"读取引用计数失败：{e}")
+            return 0
+
+    def get_ref_count_by_file_id(self, file_id: int) -> int:
+        """
+        从数据库读取文件引用计数。
+        """
+        try:
+            with Session(self._engine) as session:
+                file = session.get(File, file_id)
+                if file:
+                    hash_file = session.get(HashFile, file.file_hash)
+                    return hash_file.ref_count if hash_file else 0
+                else:
+                    return 0
+        except Exception as e:
+            logger.warning(f"读取引用计数失败：{e}")
+            return 0
+
     def get_recent(self, limit: int = 20) -> list[FileDTO]:
+        """
+            获得最近添加的文件
+
+        Args:
+            limit: 获取的最大数量
+
+        Returns:
+            获取的文件
+        """
         with Session(self._engine) as session:
             files = session.exec(
                 select(File)
@@ -379,7 +451,7 @@ class IndexManager:
             file_ids = [f.id for f in files]
             tag_rows = session.exec(
                 select(FileTagLink.file_id, Tag.name)
-                .join(Tag, FileTagLink.tag_id == Tag.id)
+                .join(Tag, col(FileTagLink.tag_id) == Tag.id)
                 .where(col(FileTagLink.file_id).in_(file_ids))
             ).all()
 
@@ -422,176 +494,13 @@ class IndexManager:
             """)).fetchall()
             return [(row[0], row[1]) for row in rows]
 
-    # ── 内部工具 ──────────────────────────────────────────────
-
     @staticmethod
-    def _sync_tags(session: Session, file_id: int, tags: list[str]) -> None:
-        """全量替换文件标签。"""
-        old_links = session.exec(
-            select(FileTagLink).where(FileTagLink.file_id == file_id)
-        ).all()
-        for link in old_links:
-            session.delete(link)
-        session.commit()
-
-        for name in {t.strip().lower() for t in tags if t.strip()}:
-            tag = session.exec(
-                select(Tag).where(Tag.name == name)
-            ).first()
-            if tag is None:
-                tag = Tag(name=name)
-                session.add(tag)
-                session.commit()
-                session.refresh(tag)
-
-            session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
-
-        session.commit()
-
-    @staticmethod
-    def _get_mtime(path: Path) -> datetime:
-        """获取文件修改时间，失败时返回当前时间。"""
-        try:
-            return datetime.fromtimestamp(path.stat().st_mtime)
-        except OSError:
-            return datetime.now()
-
-    def get_store_path(self, file_hash: str | None) -> Path | None:
+    def get_store_path(file_hash: str | None) -> Path | None:
         """根据哈希值取回物理存储路径"""
         if not file_hash:
             return None
         from cairn.core.store import FileStore
         return FileStore().get_path(file_hash)
-
-    def update_comment(self, file_id: int, comment: str) -> None:
-        """更新文件注释"""
-        with Session(self._engine) as session:
-            file = session.get(File, file_id)
-            if file:
-                file.comment = comment
-                file.indexed_at = datetime.now()
-                session.add(file)
-                session.commit()
-
-    def update_tags(self, file_id: int, tags: list[str]) -> None:
-        """全量替换文件标签"""
-        with Session(self._engine) as session:
-            self._sync_tags(session, file_id, tags)
-
-    def update_file_meta(
-            self,
-            file_id: int,
-            summary: str | None = None,
-            origin_path: str | None = None,
-            modified_at: datetime | None = None,
-            indexed_at: datetime | None = None,
-    ) -> None:
-        """批量更新文件元信息。"""
-        with Session(self._engine) as session:
-            file = session.get(File, file_id)
-            if not file:
-                return
-            if summary is not None: file.summary = summary
-            if origin_path is not None: file.origin_path = origin_path
-            if modified_at is not None: file.modified_at = modified_at
-            if indexed_at is not None: file.indexed_at = indexed_at
-            session.add(file)
-            session.commit()
-
-    def delete_from_index(
-            self,
-            file_id: int,
-            dev_mode: bool = False,
-    ) -> None:
-        """
-        从索引删除。
-
-        正常模式：ref_count - 1，归零时删物理文件。
-        开发者模式：只删数据库记录，物理文件无论如何保留。
-        """
-        with Session(self._engine) as session:
-            file = session.get(File, file_id)
-            if not file:
-                return
-
-            store_path = Path(file.path)
-            file_hash = file.file_hash
-
-            if dev_mode:
-                # 开发者模式：只删记录
-                session.delete(file)
-                session.commit()
-                logger.info(f"[DEV] 已从索引删除：{file.filename}，物理文件保留")
-                return
-
-            # 正常模式：引用计数
-            file.ref_count -= 1
-            if file.ref_count > 0:
-                session.add(file)
-                session.commit()
-                logger.info(
-                    f"已减少引用：{file.filename}，"
-                    f"剩余引用数={file.ref_count}"
-                )
-                return
-
-            # 引用归零，删记录
-            session.delete(file)
-            session.commit()
-
-        # 检查同哈希是否还有其他记录
-        if file_hash:
-            with Session(self._engine) as session:
-                same_hash = session.exec(
-                    select(File).where(File.file_hash == file_hash)
-                ).first()
-                if same_hash is None and store_path.exists():
-                    store_path.unlink(missing_ok=True)
-                    try:
-                        store_path.parent.rmdir()
-                    except OSError:
-                        pass
-                    logger.info(f"已删除物理文件：{file_hash[:12]}...")
-
-    def delete_from_store(
-            self,
-            file_id: int,
-            dev_mode: bool = False,
-    ) -> None:
-        """
-        从知识库彻底删除。
-
-        正常模式：删记录，同哈希无其他引用时才删物理文件。
-        开发者模式：强制删记录和物理文件，不检查引用。
-        """
-        with Session(self._engine) as session:
-            file = session.get(File, file_id)
-            if not file:
-                return
-            store_path = Path(file.path)
-            file_hash = file.file_hash
-            session.delete(file)
-            session.commit()
-
-        if dev_mode:
-            if store_path.exists():
-                store_path.unlink(missing_ok=True)
-                logger.info(f"[DEV] 强制删除物理文件：{file_hash}")
-            return
-
-        # 正常模式：检查同哈希引用
-        if file_hash:
-            with Session(self._engine) as session:
-                same_hash = session.exec(
-                    select(File).where(File.file_hash == file_hash)
-                ).first()
-                if same_hash is None and store_path.exists():
-                    store_path.unlink(missing_ok=True)
-                    try:
-                        store_path.parent.rmdir()
-                    except OSError:
-                        pass
-                    logger.info(f"已删除物理文件：{file_hash[:12]}...")
 
     def get_folder_tree(self) -> dict:
         """
@@ -674,57 +583,102 @@ class IndexManager:
 
         return groups
 
-    def _migrate(self) -> None:
-        """检查并补全缺失的列，向前兼容旧数据库。"""
-        from sqlalchemy import inspect as sa_inspect, text
+    # ── 删除 ──────────────────────────────────────────────
 
-        inspector = sa_inspect(self._engine)
+    def delete(
+            self,
+            file_id: int,
+            dev_mode: bool = False,
+    ) -> None:
+        """
+        从索引删除。
 
-        # 补列
-        migrations = [
-            ("files", "comment", "TEXT NOT NULL DEFAULT ''"),
-            ("files", "ref_count", "INTEGER NOT NULL DEFAULT 1"),
-        ]
-        with self._engine.connect() as conn:
-            for table, column, definition in migrations:
-                existing = {c["name"] for c in inspector.get_columns(table)}
-                if column not in existing:
-                    conn.execute(
-                        text(
-                            f"ALTER TABLE {table} "
-                            f"ADD COLUMN {column} {definition}"
-                        )
-                    )
-                    logger.info(f"数据库迁移：{table}.{column} 已添加")
+        正常模式：删数据库记录，哈希文件引用计数归零时删物理文件。
+        开发者模式：只删数据库记录，物理文件无论如何保留。
+        """
+        with Session(self._engine) as session:
+            file = session.get(File, file_id)
 
-            # 去掉 files.path 上的 UNIQUE 索引（如果存在）
-            indexes = {
-                idx["name"]
-                for idx in inspector.get_indexes("files")
-            }
-            if "ix_files_path" in indexes:
-                conn.execute(text("DROP INDEX IF EXISTS ix_files_path"))
-                # 重建为普通索引
-                conn.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS "
-                        "ix_files_path ON files (path)"
-                    )
+            if not file:
+                return
+
+            store_path = Path(file.path)
+            file_hash = file.file_hash
+            hash_file = session.get(HashFile, file_hash)
+
+            if not hash_file:
+                # 直接删除文件记录
+                session.delete(file)
+                session.commit()
+                return
+
+            ref_count = hash_file.ref_count
+
+            # 删除文件记录
+            session.delete(file)
+            # 减少引用计数并返回
+            if ref_count > 1:
+                session.exec(
+                    update(HashFile)
+                    .where(col(HashFile.file_hash) == file_hash)
+                    .values(count=ref_count - 1)
                 )
-                logger.info("数据库迁移：files.path UNIQUE 约束已移除")
-
-            # 确保 origin_path 有 UNIQUE 约束
-            if "uq_files_origin_path" not in indexes:
-                conn.execute(
-                    text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS "
-                        "uq_files_origin_path ON files (origin_path) "
-                        "WHERE origin_path IS NOT NULL"
-                    )
+                session.commit()
+                logger.info(
+                    f"已减少引用：{file.filename}，"
+                    f"剩余引用数={ref_count - 1}"
                 )
-                logger.info("数据库迁移：uq_files_origin_path 已添加")
+                return
+            else: # 引用计数归0
+                session.delete(hash_file)
+                session.commit()
 
-            conn.commit()
+        # 删除物理文件
+        if file_hash and not dev_mode:
+            store_path.unlink(missing_ok=True)
+            try:
+                store_path.parent.rmdir()
+            except OSError:
+                pass
+            logger.info(f"已删除物理文件：{file_hash[:12]}...")
+
+    def delete_from_store(
+            self,
+            file_id: int
+    ) -> None:
+        """
+        从知识库彻底删除(开发者)。
+
+        强制删记录和物理文件，不检查引用。
+        """
+        with Session(self._engine) as session:
+            file = session.get(File, file_id)
+            if not file:
+                return
+            store_path = Path(file.path)
+            file_hash = file.file_hash
+            session.delete(file)
+            session.commit()
+
+        if store_path.exists():
+            store_path.unlink(missing_ok=True)
+            logger.info(f"[DEV] 强制删除物理文件：{file_hash}")
+
+        # 正常模式：检查同哈希引用
+        if file_hash:
+            with Session(self._engine) as session:
+                same_hash = session.exec(
+                    select(File).where(File.file_hash == file_hash)
+                ).first()
+                if same_hash is None and store_path.exists():
+                    store_path.unlink(missing_ok=True)
+                    try:
+                        store_path.parent.rmdir()
+                    except OSError:
+                        pass
+                    logger.info(f"已删除物理文件：{file_hash[:12]}...")
+
+    # ── 文件恢复 ──────────────────────────────────────────────────
 
     def restore_file(
             self,
@@ -743,7 +697,7 @@ class IndexManager:
             file = session.get(File, file_id)
             if not file:
                 return False, "索引记录不存在"
-            dto = FileDTO.from_orm(file)
+            dto = FileDTO.from_orm(file)  # NOQA
 
         store_path = self.get_store_path(dto.file_hash)
         if not store_path or not store_path.exists():
@@ -775,8 +729,10 @@ class IndexManager:
             return False, f"还原失败：{e}"
 
         # 还原成功，从索引删除
-        self.delete_from_index(file_id)
+        self.delete(file_id)
         return True, str(dest)
+
+    # ── 垃圾清理 ──────────────────────────────────────────────────
 
     def scan_orphaned_files(self) -> tuple[list[Path], int]:
         """扫描无引用的孤立物理文件。"""
@@ -836,3 +792,61 @@ class IndexManager:
             f"释放 {freed / 1024 / 1024:.1f} MB"
         )
         return deleted, freed
+
+    # ── 内部工具 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _sync_tags(session: Session, file_id: int, tags: list[str]) -> None:
+        """全量替换文件标签。"""
+        old_links = session.exec(
+            select(FileTagLink).where(FileTagLink.file_id == file_id)
+        ).all()
+        for link in old_links:
+            session.delete(link)
+        session.commit()
+
+        for name in {t.strip().lower() for t in tags if t.strip()}:
+            tag = session.exec(
+                select(Tag).where(Tag.name == name)
+            ).first()
+            if tag is None:
+                tag = Tag(name=name)
+                session.add(tag)
+                session.commit()
+                session.refresh(tag)
+
+            session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
+
+        session.commit()
+
+    @staticmethod
+    def _get_mtime(path: Path) -> datetime:
+        """获取文件修改时间，失败时返回当前时间。"""
+        try:
+            return datetime.fromtimestamp(path.stat().st_mtime)
+        except OSError:
+            return datetime.now()
+
+    def _migrate(self) -> None:
+        """检查并补全缺失的列，向前兼容旧数据库。"""
+        from sqlalchemy import inspect as sa_inspect, text
+
+        inspector = sa_inspect(self._engine)
+
+        # 补列
+        migrations = [
+            ("files", "comment", "TEXT NOT NULL DEFAULT ''"),
+        ]
+        with self._engine.connect() as conn:
+            for table, column, definition in migrations:
+                existing = {c["name"] for c in inspector.get_columns(table)}
+                if column not in existing:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table} "
+                            f"ADD COLUMN {column} {definition}"
+                        )
+                    )
+                    logger.info(f"数据库迁移：{table}.{column} 已添加")
+
+            conn.commit()
