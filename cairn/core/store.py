@@ -40,10 +40,11 @@ class FileStore:
         if dest.exists():
             # 内容完全相同，去重，删除源文件
             logger.debug(f"去重：{source.name} → 已存在 {file_hash[:12]}...")
-            source.unlink(missing_ok=True)
+            # source.unlink(missing_ok=True)
         else:
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(dest))
+            # shutil.move(str(source), str(dest))
+            shutil.copy(source, dest)
             logger.info(f"已入库：{source.name} → {file_hash[:12]}...")
 
         return dest, file_hash

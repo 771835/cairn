@@ -190,6 +190,8 @@ class FileListMixin:
         if reply != QMessageBox.StandardButton.Yes:
             return
         for dto in dtos:
+            if dto is None: # 跳过不存在实际文件的条目
+                continue
             IndexManager().delete(dto.id)
         self._remove_dtos_from_view(dtos)
 

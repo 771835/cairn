@@ -6,12 +6,13 @@ from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy.dialects.sqlite import insert
-from sqlmodel import Session, SQLModel, create_engine, select, text, col, update
+from sqlmodel import Session, SQLModel, create_engine, select, text, col, update, delete
 
 from cairn.core.config import DB_PATH
 from cairn.core.index.models import File, Tag, FileTagLink, FileDTO, HashFile
 from cairn.core.index.search import SearchEngine, SearchQuery, SearchResult
 from cairn.core.parser.base import ParseResult
+from cairn.utils.fmt_tools import normalize_to_platform
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -129,7 +130,6 @@ class IndexManager:
         with _index_lock:
             with Session(self._engine) as session:
                 try:
-
                     stmt = (
                         insert(HashFile)
                         .values(file_hash=result.file_hash, ref_count=1)
@@ -157,33 +157,39 @@ class IndexManager:
                     #     return existing_origin.id
 
                     # ── 无论是否已存在同哈希文件，都建新记录 ──────────────────
-                    new_file = File(
-                        path=store_path,
-                        origin_path=origin,
-                        filename=result.filename,
-                        ext=result.ext,
-                        size=result.size,
-                        content=result.content,
-                        summary=result.metadata.get("summary", ""),
-                        features=json.dumps(
-                            result.metadata, ensure_ascii=False
-                        ),
-                        comment="",
-                        indexed_at=datetime.now(),
-                        modified_at=self._get_mtime(Path(origin)),
-                        file_hash=result.file_hash,
-                        is_folder=False
+                    file_stmt = (
+                        insert(File)
+                        .values(
+                            path=store_path,
+                            origin_path=origin,
+                            filename=result.filename,
+                            ext=result.ext,
+                            size=result.size,
+                            content=result.content,
+                            summary=result.metadata.get("summary", ""),
+                            features=json.dumps(result.metadata, ensure_ascii=False),
+                            comment="",
+                            indexed_at=datetime.now(),
+                            modified_at=self._get_mtime(Path(origin)),
+                            file_hash=result.file_hash,
+                            is_folder=False
+                        )
+                        .returning(File.id)  # 直接获取 ID
                     )
-                    session.add(new_file)
+
+                    # 获取 ID
+                    new_file_id = session.exec(file_stmt).one().t[0]
+
+                    # 提交事务
                     session.commit()
-                    session.refresh(new_file)
-                    self._sync_tags(session, new_file.id, result.tags)
+
+                    self._sync_tags(session, new_file_id, result.tags)
 
                     logger.info(
                         f"已写入：{result.filename} "
                         f"| {result.file_hash[:12]}..."
                     )
-                    return new_file.id
+                    return new_file_id
                 except Exception as e:
                     session.rollback()
                     logger.error(
@@ -621,7 +627,7 @@ class IndexManager:
                 session.exec(
                     update(HashFile)
                     .where(col(HashFile.file_hash) == file_hash)
-                    .values(count=ref_count - 1)
+                    .values(ref_count=ref_count - 1)
                 )
                 session.commit()
                 logger.info(
@@ -705,7 +711,7 @@ class IndexManager:
 
         # 确定目标路径
         dest = target_path or (
-            Path(dto.origin_path) if dto.origin_path else None
+            Path(normalize_to_platform(dto.origin_path)) if dto.origin_path else None
         )
         if dest is None:
             return False, "无原始路径，请使用另存为"
@@ -796,7 +802,7 @@ class IndexManager:
     # ── 内部工具 ──────────────────────────────────────────────
 
     @staticmethod
-    def _sync_tags(session: Session, file_id: int, tags: list[str]) -> None:
+    def _sync_tags_last(session: Session, file_id: int, tags: list[str]) -> None:
         """全量替换文件标签。"""
         old_links = session.exec(
             select(FileTagLink).where(FileTagLink.file_id == file_id)
@@ -817,6 +823,55 @@ class IndexManager:
 
             session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
 
+        session.commit()
+
+    @staticmethod
+    def _sync_tags(session: Session, file_id: int, tags: list[str]) -> None:
+        """全量替换文件标签"""
+        # 数据预处理：去重、清理空字符串
+        unique_tags = {t.strip().lower() for t in tags if t.strip()}
+
+        if not unique_tags:
+            # 如果没有标签，直接清理旧链接并返回
+            session.exec(delete(FileTagLink).where(col(FileTagLink.file_id) == file_id))
+            session.commit()
+            return
+
+        # 批量查找现有标签 (避免循环查询)
+        # 使用 in_() 一次性查出所有可能的 Tag
+        existing_tags = session.exec(
+            select(Tag).where(col(Tag.name).in_(unique_tags))
+        ).all()
+
+        # 建立 name -> Tag对象的映射表，速度极快
+        tag_map = {tag.name: tag for tag in existing_tags}
+
+        # 创建新标签 (内存操作，不提交)
+        new_tags = []
+        for name in unique_tags:
+            if name not in tag_map:
+                new_tag = Tag(name=name)
+                new_tags.append(new_tag)
+                tag_map[name] = new_tag  # 填充 map
+
+        # 批量添加新标签到 Session
+        if new_tags:
+            session.add_all(new_tags)
+
+        # 批量删除旧链接 (SQL 批量删除，不查询)
+        session.exec(
+            delete(FileTagLink).where(col(FileTagLink.file_id) == file_id)
+        )
+
+        # 批量创建新链接
+        # 构建 FileTagLink 对象列表
+        new_links = [
+            FileTagLink(file_id=file_id, tag_id=tag_map[name].id)
+            for name in unique_tags
+        ]
+        session.add_all(new_links)
+
+        # 只提交一次
         session.commit()
 
     @staticmethod

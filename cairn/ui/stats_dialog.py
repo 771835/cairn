@@ -1,4 +1,5 @@
 # coding=utf-8
+import os
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
@@ -9,12 +10,35 @@ from PySide6.QtWidgets import (
 )
 from sqlmodel import Session, select, func, col, case
 
+from cairn.core.config import config
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import File, Tag, FileTagLink
 from cairn.utils.fmt_tools import format_size
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+
+def get_folder_size_blocks(path, block_size=4096):
+    """计算目录占用的实际磁盘块数（考虑文件系统块大小）"""
+    total_blocks = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        # 计算目录本身占用的块数
+        dir_stat = os.stat(dirpath)
+        total_blocks += (dir_stat.st_size + block_size - 1) // block_size
+
+        # 计算文件占用的块数
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename) # noqa
+            try:
+                file_stat = os.stat(filepath)
+                # 计算文件占用的块数（向上取整）
+                blocks = (file_stat.st_size + block_size - 1) // block_size
+                total_blocks += blocks
+            except OSError:
+                continue
+    return total_blocks * block_size  # 转换为字节
 
 
 # ── 数据类 ────────────────────────────────────────────────────
@@ -27,6 +51,7 @@ class StatsData:
         self.total_files: int = 0
         self.total_folders: int = 0
         self.total_size: int = 0
+        self.actual_size: int = 0
         self.total_tags: int = 0
         self.ext_counts: list[tuple[str, int]] = []
         self.top_tags: list[tuple[str, int]] = []
@@ -57,16 +82,18 @@ class StatsWorker(QObject):
         idx = IndexManager()
         data = StatsData()
 
+        data.actual_size = get_folder_size_blocks(config.store_root)
+
         with Session(idx.engine) as session:
             # ── 文件数 / 文件夹数 / 总大小 ────────────────────────
             # 用 case() 在一次查询里同时统计三个值
             overview = session.exec(
                 select(
                     func.sum(
-                        case((File.is_folder == False, 1), else_=0)  # noqa: E712
+                        case((col(File.is_folder) == False, 1), else_=0)
                     ),
                     func.sum(
-                        case((File.is_folder == True, 1), else_=0)  # noqa: E712
+                        case((col(File.is_folder) == True, 1), else_=0)
                     ),
                     func.coalesce(func.sum(File.size), 0),
                 )
@@ -119,6 +146,8 @@ class StatsWorker(QObject):
                     if recent.indexed_at is not None
                     else "—"
                 )
+
+
 
         return data
 
@@ -294,7 +323,8 @@ class StatsDialog(QDialog):
         rows = [
             ("文件总数", f"{data.total_files:,} 个"),
             ("文件夹数", f"{data.total_folders:,} 个"),
-            ("占用空间", format_size(data.total_size)),
+            ("总计大小", format_size(data.total_size)),
+            ("占用空间", format_size(data.actual_size)),
             ("标签总数", f"{data.total_tags} 个"),
         ]
         for label, value in rows:

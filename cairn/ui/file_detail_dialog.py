@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
 from cairn.ui.widgets import TagEditor
-from cairn.utils.fmt_tools import format_size
+from cairn.utils.fmt_tools import format_size, format_path
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -355,7 +355,7 @@ class FileDetailDialog(QDialog):
         idx.update_file_meta(
             file_id=self._dto.id,
             summary=summary,
-            origin_path=origin_path,
+            origin_path=format_path(origin_path),
             modified_at=modified_at,
             indexed_at=indexed_at,
         )
