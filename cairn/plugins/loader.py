@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from cairn.core.config import config
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -15,8 +16,8 @@ class PluginLoader:
     读取 plugin.json 声明，动态加载插件类。
     """
 
-    def __init__(self, plugins_dir: str = "plugins"):
-        self.plugins_dir = Path(plugins_dir)
+    def __init__(self):
+        self.plugins_dir = Path(config.plugins.dir)
         self.plugins_locals: dict[str, dict] = {}
 
     def load_all(self):
@@ -43,6 +44,12 @@ class PluginLoader:
         required_keys = {"name", "version", "entry", "class"}
         if not required_keys.issubset(meta):
             logger.error(f"插件声明缺少必要字段：{manifest}")
+            return
+
+        # 配置级禁用优先于插件自身声明
+        plugin_name = str(meta["name"])
+        if plugin_name in config.plugins.disabled:
+            logger.debug(f"插件已被配置禁用，跳过：{plugin_name}")
             return
 
         if not meta.get("enabled", True):

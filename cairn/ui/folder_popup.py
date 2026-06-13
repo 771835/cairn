@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 
+from cairn.core.config import config
+
 
 # ── 文件夹处理选择窗口 ────────────────────────────────────────
 class FolderBatchChoicePopup(QWidget):
@@ -17,7 +19,7 @@ class FolderBatchChoicePopup(QWidget):
     设计要点：
     - 无边框，半透明背景
     - 出现在鼠标释放位置附近
-    - 3秒无操作自动关闭（默认展开）
+    - 一定时间内无操作自动关闭（默认展开）
     - 两个选择：展开处理 / 整体索引
     - 显示文件夹数量，用户选择统一处理模式。
     """
@@ -27,7 +29,8 @@ class FolderBatchChoicePopup(QWidget):
     def __init__(self):
         super().__init__()
         self._folders: list[Path] = []
-        self._countdown = 5
+        self._cfg = config.folder
+        self._countdown = self._cfg.auto_close_s
         self._auto_timer = QTimer(self)
         self._auto_timer.setSingleShot(True)
         self._auto_timer.timeout.connect(self._on_timeout)
@@ -126,7 +129,7 @@ class FolderBatchChoicePopup(QWidget):
         self.move(x, y)
 
         self.show()
-        self._auto_timer.start(5000)
+        self._auto_timer.start(self._cfg.auto_close_s * 1000)
         self._tick_timer.start()
 
     def _tick(self):
@@ -137,7 +140,7 @@ class FolderBatchChoicePopup(QWidget):
         self._hint.setText(f"{self._countdown}s 后自动展开处理")
 
     def _on_timeout(self):
-        self._choose("expand")
+        self._choose(self._cfg.default_action)
 
     def _choose(self, mode: str):
         self._auto_timer.stop()

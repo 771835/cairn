@@ -3,6 +3,8 @@ import logging
 import sys
 from pathlib import Path
 
+from cairn.core.config import config
+
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(exist_ok=True)
 
@@ -22,7 +24,7 @@ def get_logger(name: str) -> logging.Logger:
 
     # 终端输出（INFO 及以上）
     sh = logging.StreamHandler(sys.stdout)
-    sh.setLevel(logging.INFO)
+    sh.setLevel(config.log_level)
     sh.setFormatter(fmt)
 
     # 文件输出（DEBUG 及以上）

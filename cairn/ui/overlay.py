@@ -6,7 +6,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtCore import Qt, Signal, QPoint
 
 from cairn.utils.logger import get_logger
-
+from cairn.core.config import config
 logger = get_logger(__name__)
 
 
@@ -25,6 +25,7 @@ class DropOverlay(QWidget):
     def __init__(self):
         super().__init__()
         self._is_hovering = False
+        self._cfg = config.overlay
         self._setup_window()
         self._position_on_edge()
 
@@ -39,24 +40,42 @@ class DropOverlay(QWidget):
         self.setToolTip("拖入文件以触发 Cairn 处理")
 
     def _position_on_edge(self):
-        """贴靠屏幕右侧，宽 24px，高占屏幕 40%"""
+        """贴靠屏幕边缘，尺寸由配置决定。"""
         screen = QApplication.primaryScreen().geometry()
-        w, h = 24, int(screen.height() * 0.4)
-        self.setGeometry(
-            screen.width() - w,
-            (screen.height() - h) // 2,
-            w, h
-        )
+        w = self._cfg.width
+        h = int(screen.height() * self._cfg.size_ratio)
+        edge = self._cfg.edge
+
+        if edge == "right":
+            self.setGeometry(
+                screen.width() - w, (screen.height() - h) // 2, w, h
+            )
+        elif edge == "left":
+            self.setGeometry(0, (screen.height() - h) // 2, w, h)
+        elif edge == "top":
+            self.setGeometry(
+                (screen.width() - h) // 2, 0, h, w
+            )
+        elif edge == "bottom":
+            self.setGeometry(
+                (screen.width() - h) // 2, screen.height() - w, h, w
+            )
+        else:
+            # 兜底：默认右侧
+            self.setGeometry(
+                screen.width() - w, (screen.height() - h) // 2, w, h
+            )
 
     # ── 绘制 ──────────────────────────────────────────────
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        alpha = 180 if self._is_hovering else 40
-        painter.setBrush(QColor(100, 180, 255, alpha))
+        alpha = self._cfg.hover_alpha if self._is_hovering else self._cfg.idle_alpha
+        r, g, b = self._cfg.color
+        painter.setBrush(QColor(r, g, b, alpha))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(self.rect(), 6, 6)
+        painter.drawRoundedRect(self.rect(), self._cfg.border_radius, self._cfg.border_radius)
 
     # ── 拖放事件 ──────────────────────────────────────────
 

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 
+from cairn.core.config import config
 from cairn.core.index.manager import IndexManager
 from cairn.core.parser.base import ParseResult
 from cairn.core.parser.manager import ParserManager
@@ -12,11 +13,6 @@ from cairn.core.rule_engine.engine import RuleEngine
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-PARSE_TIMEOUT = 30  # 秒，超时后降级处理
-
-_MAX_RETRY = 3
-_RETRY_DELAY = 0.5  # 秒，每次翻倍
 
 
 
@@ -28,9 +24,14 @@ class FileEventDispatcher(QObject):
         super().__init__()
         self._parser_manager = ParserManager()
         self._rule_engine = RuleEngine()
-        # 两个线程池：主池处理文件，解析池专门做带超时的解析
-        self._executor = ThreadPoolExecutor(max_workers=8)
-        self._parse_executor = ThreadPoolExecutor(max_workers=4)
+
+        cfg = config.dispatcher
+        self._parse_timeout = cfg.max_retry and config.parse_timeout
+        self._max_retry = cfg.max_retry
+        self._retry_delay = cfg.retry_delay
+
+        self._executor = ThreadPoolExecutor(max_workers=cfg.worker_threads)
+        self._parse_executor = ThreadPoolExecutor(max_workers=cfg.parse_threads)
 
     def dispatch(self, file_paths: list[Path]):
         for path in file_paths:
@@ -53,7 +54,7 @@ class FileEventDispatcher(QObject):
                 self._parser_manager.parse, file_path
             )
             try:
-                result = future.result(timeout=PARSE_TIMEOUT)
+                result = future.result(timeout=self._parse_timeout)
             except TimeoutError:
                 logger.warning(f"解析超时，降级：{file_path.name}")
                 result = self._parser_manager.fallback(file_path)
@@ -84,7 +85,7 @@ class FileEventDispatcher(QObject):
                 future = self._parse_executor.submit(
                     self._parser_manager.parse, f
                 )
-                result = future.result(timeout=PARSE_TIMEOUT)
+                result = future.result(timeout=self._parse_timeout)
             except Exception:
                 result = self._parser_manager.fallback(f)
 
@@ -129,22 +130,22 @@ class FileEventDispatcher(QObject):
         import sqlite3
         from sqlalchemy.exc import OperationalError
 
-        delay = _RETRY_DELAY
-        for attempt in range(1, _MAX_RETRY + 1):
+        delay = self._retry_delay
+        for attempt in range(1, self._max_retry + 1):
             try:
                 return IndexManager().index_file(result, original_path)
             except (OperationalError, sqlite3.OperationalError) as e:
                 # 数据库繁忙/锁，等待后重试
-                if attempt < _MAX_RETRY:
+                if attempt < self._max_retry:
                     logger.warning(
                         f"数据库繁忙，{delay:.1f}s 后重试"
-                        f"（{attempt}/{_MAX_RETRY}）：{result.filename}"
+                        f"（{attempt}/{self._max_retry}）：{result.filename}"
                     )
                     time.sleep(delay)
                     delay *= 2
                 else:
                     logger.error(
-                        f"写入失败，已重试 {_MAX_RETRY} 次放弃："
+                        f"写入失败，已重试 {self._max_retry} 次放弃："
                         f"{result.filename} — {e}"
                     )
                     return None

@@ -36,7 +36,7 @@ class File(SQLModel, table=True):
     """文件索引主表"""
     __tablename__ = "files"
     __table_args__ = (
-        # 真正的唯一性：同一个来源路径不能重复索引
+        # 同一个来源路径不能重复索引，否则fts5会炸
         UniqueConstraint("origin_path", name="uq_files_origin_path"),
     )
 

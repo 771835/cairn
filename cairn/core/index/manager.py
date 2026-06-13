@@ -8,7 +8,7 @@ from pathlib import Path
 from sqlalchemy.dialects.sqlite import insert
 from sqlmodel import Session, SQLModel, create_engine, select, text, col, update, delete
 
-from cairn.core.config import DB_PATH
+from cairn.core.config import config
 from cairn.core.index.models import File, Tag, FileTagLink, FileDTO, HashFile
 from cairn.core.index.search import SearchEngine, SearchQuery, SearchResult
 from cairn.core.parser.base import ParseResult
@@ -77,19 +77,19 @@ class IndexManager:
         if self._initialized:
             return
 
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        config.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._engine = create_engine(
-            f"sqlite:///{DB_PATH}",
+            f"sqlite:///{config.db_path}",
             connect_args={
                 "check_same_thread": False,
-                "timeout": 30  # 等锁最多 30 秒，超时抛异常而不是永久卡死
+                "timeout": config.db.busy_timeout  # 超时抛异常而不是永久卡死
             },
             echo=False,
         )
 
         with self._engine.connect() as conn:
-            conn.execute(text("PRAGMA journal_mode=WAL"))  # 将 SQLite 的日志模式设置为 WAL
+            conn.execute(text(f"PRAGMA journal_mode={config.db.journal_mode}"))  # 设置 SQLite 的日志模式
             conn.execute(text("PRAGMA foreign_keys=ON"))  # 开启 SQLite 的 外键约束
             conn.commit()
 
@@ -100,7 +100,7 @@ class IndexManager:
         self._search_engine = SearchEngine(self._engine)
 
         self._initialized = True
-        logger.info(f"IndexManager 初始化完成：{DB_PATH}")
+        logger.info(f"IndexManager 初始化完成：{config.db_path}")
 
     def _init_fts(self) -> None:
         """初始化 FTS5 虚拟表和触发器"""
@@ -141,20 +141,24 @@ class IndexManager:
 
                     session.exec(stmt)
 
-                    #
-                    # # ── 按 origin_path 判断是否已索引过 ──────────
-                    #
-                    # existing_origin = session.exec(
-                    #     select(File).where(
-                    #         col(File.origin_path) == origin
-                    #     )
-                    # ).first()
-                    #
-                    # if existing_origin is not None:
-                    #     logger.info(
-                    #         f"已索引，跳过：{result.filename}"
-                    #     )
-                    #     return existing_origin.id
+
+                    # ── 按 origin_path 判断是否已索引过 ──────────
+                    _count = 0
+                    final_path = origin
+                    while True:
+                        _count +=1
+                        existing_origin = session.exec(
+                            select(File).where(
+                                col(File.origin_path) == final_path
+                            )
+                        ).first()
+
+                        if existing_origin is not None:
+                            final_path = f"{origin}({_count})"
+                        else:
+                            break
+
+                    origin = final_path
 
                     # ── 无论是否已存在同哈希文件，都建新记录 ──────────────────
                     file_stmt = (

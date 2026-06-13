@@ -84,11 +84,11 @@ class CairnTray(QSystemTrayIcon):
             logger.info(f"静默通知：{message}")
         else:
             self.showMessage("Cairn", message,
-                             QSystemTrayIcon.MessageIcon.Information, 3000)
+                             QSystemTrayIcon.MessageIcon.Information, config.notify.info_duration_ms)
 
     def _on_error(self, message: str):
         self.showMessage("Cairn — 错误", message,
-                         QSystemTrayIcon.MessageIcon.Critical, 4000)
+                         QSystemTrayIcon.MessageIcon.Critical, config.notify.error_duration_ms)
 
     def _wake_hot_key(self):
         self.hotkey.emit()

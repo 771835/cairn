@@ -1,6 +1,7 @@
 # coding=utf-8
 from pathlib import Path
 
+from cairn.core.config import config
 from cairn.core.parser.base import ParseResult
 from cairn.core.rule_engine.dsl_parser import DSLParser, FileContext, Rule
 from cairn.plugins.registry import ActionRegistry
@@ -63,5 +64,8 @@ class RuleEngine:
                 logger.error(
                     f"规则 '{rule.name}' 指令 '{cmd.name}' 执行失败：{e}"
                 )
+                if config.dev_mode:
+                    import traceback
+                    traceback.print_tb(e.__traceback__)
 
         return False  # 正常结束，继续匹配
