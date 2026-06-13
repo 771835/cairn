@@ -1,0 +1,7 @@
+{
+  "name": "more_parsers",
+  "version": "1.0.0",
+  "entry": "parser.py",
+  "class": "MoreParsersPlugin",
+  "enabled": true
+}

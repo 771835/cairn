@@ -1,6 +1,7 @@
 # coding=utf-8
-
+import json
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QDateTime
 from PySide6.QtWidgets import (
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import (
     QWidget, QFrame, QScrollArea,
     QPushButton, QApplication,
 )
+from charset_normalizer import from_bytes
 
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
@@ -18,6 +20,59 @@ from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+def _is_text_file(path: Path) -> bool:
+    """判断文件是否为可显示的文本文件。"""
+    try:
+        # 读取前 8KB 进行检查
+        with open(path, "rb") as f:
+            chunk = f.read(8192)
+
+        # 简单过滤：如果包含 NULL 字节，通常视为二进制文件
+        if b"\x00" in chunk:
+            return False
+
+        # 进阶：使用 charset-normalizer 验证是否为文本
+        # 如果置信度太低，也可以认为是二进制
+        res = from_bytes(chunk).best()
+        if res and res.chaos < 0.5:  # chaos 是混乱度，越低越像文本
+            return True
+
+        return False
+    except OSError:
+        return False
+
+
+def _read_text_preview(path: Path, max_chars: int = 4000) -> str | None:
+    """
+    读取文本文件前 N 个字符作为预览。自动识别编码。
+    """
+    if not _is_text_file(path):
+        return None
+
+    try:
+        # 只读取前 64KB 用于识别编码，避免大文件读取过慢
+        raw_data = path.read_bytes()[:64 * 1024]
+
+        # 使用 charset-normalizer 检测编码
+        result = from_bytes(raw_data).best()
+
+        if result and result.encoding:
+            encoding = result.encoding
+            # 使用检测到的编码读取全文件
+            text = path.read_text(encoding=encoding)
+        else:
+            # 如果检测失败，尝试用 utf-8 兜底
+            text = path.read_text(encoding="utf-8", errors="replace")
+
+        # 截断逻辑
+        if len(text) > max_chars:
+            return text[:max_chars] + "\n\n... (已截断)"
+        return text
+
+    except Exception as e:
+        logger.debug(f"内容预览读取失败：{e}")
+        return None
 
 def _to_qdatetime(dt: datetime | None) -> QDateTime:
     """将 Python datetime 转为 QDateTime。"""
@@ -82,6 +137,19 @@ class _EditField(QLineEdit):
         )
 
 
+class _MetadataField(QLineEdit):
+    """metadata 键值展示，等宽字体。"""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(text, parent)
+        self.setReadOnly(True)
+        self.setStyleSheet(
+            "background: #1a1a1a; color: #aaa; "
+            "border: 1px solid #333; border-radius: 4px; padding: 4px 8px; "
+            "font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;"
+        )
+
+
 class FileDetailDialog(QDialog):
     """
     文件详情与编辑窗口。
@@ -102,6 +170,16 @@ class FileDetailDialog(QDialog):
         )
         self._setup_ui()
         self._apply_theme()
+
+    @staticmethod
+    def _parse_features(features_raw: str | None) -> dict:
+        """将 features 字段的 JSON 字符串解析为 dict，失败返回空 dict。"""
+        if not features_raw:
+            return {}
+        try:
+            return json.loads(features_raw)
+        except json.JSONDecodeError:
+            return {}
 
     def _setup_ui(self) -> None:
         """构建完整详情界面。"""
@@ -160,17 +238,25 @@ class FileDetailDialog(QDialog):
         )
         content_layout.addWidget(self._summary_edit)
 
-        if self._dto.content:
-            content_layout.addWidget(_section("内容预览（只读）"))
+        metadata = self._parse_features(self._dto.features)
+        if metadata:
+            content_layout.addWidget(_section("元数据 (Metadata)"))
+            content_layout.addWidget(_divider())
+            content_layout.addLayout(self._build_metadata_section(metadata))
+
+        # ── 新增：文本内容预览（读原文件，仅文本文件） ──
+        preview_text = self._load_file_preview()
+        if preview_text is not None:
+            content_layout.addWidget(_section("文件内容预览（只读）"))
             content_layout.addWidget(_divider())
             preview = QTextEdit()
-            preview.setPlainText(self._dto.content[:1000])
+            preview.setPlainText(preview_text)
             preview.setReadOnly(True)
-            preview.setFixedHeight(120)
+            preview.setFixedHeight(180)
             preview.setStyleSheet(
                 "background: #1a1a1a; color: #666; "
                 "border: 1px solid #333; border-radius: 4px; padding: 4px; "
-                "font-family: monospace; font-size: 11px;"
+                "font-family: 'Consolas', 'Courier New', monospace; font-size: 11px;"
             )
             content_layout.addWidget(preview)
 
@@ -178,6 +264,64 @@ class FileDetailDialog(QDialog):
         scroll.setWidget(content)
         root_layout.addWidget(scroll)
         root_layout.addWidget(self._build_footer())
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
+        root_layout.addWidget(self._build_footer())
+
+    def _load_file_preview(self) -> str | None:
+        """
+        从物理存储路径读取文件内容预览。
+        仅文本文件返回内容，二进制文件返回 None。
+        """
+        # 优先用 store path（哈希存储路径）
+        store_path = None
+        if self._dto.file_hash:
+            store_path = IndexManager().get_store_path(self._dto.file_hash)
+        # 回退到记录的 path
+        file_path = store_path or Path(self._dto.path)
+
+        if not file_path.exists():
+            return None
+
+        return _read_text_preview(file_path, max_chars=4000)
+
+    def _build_metadata_section(self, metadata: dict) -> QFormLayout:
+        """构建 metadata 键值对展示区。"""
+        form = QFormLayout()
+        form.setSpacing(4)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        for key, value in metadata.items():
+            # 跳过 summary（已在上面的摘要区展示）
+            if key == "summary":
+                continue
+            # 格式化显示值
+            if isinstance(value, list):
+                display = ", ".join(str(v) for v in value)
+            elif isinstance(value, dict):
+                display = json.dumps(value, ensure_ascii=False, indent=2)
+                # 多行 dict 用 QTextEdit
+                val_widget = QTextEdit()
+                val_widget.setPlainText(display)
+                val_widget.setReadOnly(True)
+                val_widget.setFixedHeight(min(24 * display.count("\n") + 40, 120))
+                val_widget.setStyleSheet(
+                    "background: #1a1a1a; color: #aaa; "
+                    "border: 1px solid #333; border-radius: 4px; padding: 4px; "
+                    "font-family: 'Consolas', 'Courier New', monospace; font-size: 11px;"
+                )
+                form.addRow(f"{key}", val_widget)
+                continue
+            elif isinstance(value, bool):
+                display = "✓" if value else "✗"
+            else:
+                display = str(value)
+
+            form.addRow(f"{key}", _MetadataField(display))
+
+        return form
 
     def _build_header(self) -> QWidget:
         """构建顶部文件名标题栏。"""

@@ -63,8 +63,7 @@ class PluginLoader:
         # 获得插件的作用域
         plugin_locals = self.plugins_locals.get(plugin_name, {})
         try:
-            global_env: dict = dict()
-            global_env.update(
+            plugin_locals.update(
                 {
                     "__path__": str(plugin_dir.resolve()),
                     "__package__": str(plugin_dir.resolve().relative_to(Path.cwd())).replace(os.sep, "."),
@@ -74,8 +73,7 @@ class PluginLoader:
                 }
             )
             # 执行代码
-            exec(code, global_env, plugin_locals)
-            global_env.update(plugin_locals)
+            exec(code, plugin_locals, plugin_locals)
             self.plugins_locals[plugin_name] = plugin_locals
             # 搜索入口类
             if plugin_main_class := plugin_locals.get(meta["class"], None):

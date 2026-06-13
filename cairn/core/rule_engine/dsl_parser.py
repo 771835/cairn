@@ -2,7 +2,7 @@
 
 import os
 import re
-from dataclasses import dataclass, field
+from attrs import define, field
 from datetime import datetime
 from pathlib import Path
 
@@ -61,14 +61,14 @@ _BUILTIN_OPS = {"=", "==", ">", "<", ">=", "<=", "~", "in"}
 
 # ── 运行时数据结构 ────────────────────────────────────────────
 
-@dataclass
+@define(slots=True)
 class FileContext:
     filename: str
     ext: str
     filepath: str
     size: int
     system: str
-    modified: datetime = field(default_factory=datetime.now)
+    modified: datetime = field(factory=datetime.now)
 
     @classmethod
     def from_path(cls, path: Path) -> "FileContext":
@@ -86,11 +86,11 @@ class FileContext:
         return getattr(self, key, None)
 
 
-@dataclass
+@define(slots=True)
 class FilterItem:
     field_name: str
     op: str | None = None
-    values: list = field(default_factory=list)  # 统一为列表
+    values: list = field(factory=list)  # 统一为列表
 
     def evaluate(self, ctx: FileContext) -> bool:
         actual = ctx.get(self.field_name)
@@ -162,26 +162,26 @@ class FilterItem:
         return False
 
 
-@dataclass
+@define(slots=True)
 class FilterGroup:
-    items: list[FilterItem] = field(default_factory=list)
+    items: list[FilterItem] = field(factory=list)
 
     def evaluate(self, ctx: FileContext) -> bool:
         return all(item.evaluate(ctx) for item in self.items)
 
 
-@dataclass
+@define(slots=True)
 class Command:
     name: str
-    args: list[str] = field(default_factory=list)
+    args: list[str] = field(factory=list)
 
 
-@dataclass
+@define(slots=True)
 class Rule:
     name: str
     priority: float
     filter_group: FilterGroup
-    commands: list[Command] = field(default_factory=list)
+    commands: list[Command] = field(factory=list)
 
 
 # ── Transformer ───────────────────────────────────────────────

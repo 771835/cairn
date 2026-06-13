@@ -1,12 +1,13 @@
 # coding=utf-8
 import json
 from pathlib import Path
-from dataclasses import dataclass, field
+
+from attrs import define, field
 
 CONFIG_PATH = Path("config/settings.json")
 
 
-@dataclass
+@define(slots=True)
 class NotifyConfig:
     batch_window_ms: int = 2000
     silent_threshold: int = 5
@@ -14,18 +15,18 @@ class NotifyConfig:
     error_duration_ms: int = 4000
 
 
-@dataclass
+@define(slots=True)
 class OverlayConfig:
     edge: str = "right"
     size_ratio: float = 0.4
     width: int = 24
     idle_alpha: int = 40
     hover_alpha: int = 180
-    color: list[int] = field(default_factory=lambda: [100, 180, 255])
+    color: list[int] = field(factory=lambda: [100, 180, 255])
     border_radius: int = 6
 
 
-@dataclass
+@define(slots=True)
 class DispatcherConfig:
     worker_threads: int = 8
     parse_threads: int = 4
@@ -33,26 +34,26 @@ class DispatcherConfig:
     retry_delay: float = 0.5
 
 
-@dataclass
+@define(slots=True)
 class DbConfig:
     busy_timeout: int = 30
     journal_mode: str = "WAL"
     foreign_keys: bool = True
 
 
-@dataclass
+@define(slots=True)
 class FolderConfig:
     auto_close_s: int = 5
     default_action: str = "expand"  # "expand" | "whole"
 
 
-@dataclass
+@define(slots=True)
 class PluginsConfig:
     dir: str = "plugins"
-    disabled: list[str] = field(default_factory=list)
+    disabled: list[str] = field(factory=list)
 
 
-@dataclass
+@define(slots=True)
 class AppConfig:
     store_root: Path
     db_path: Path

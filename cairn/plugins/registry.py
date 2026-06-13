@@ -48,7 +48,7 @@ class ParserRegistry:
     负责注册和存储全局的解析器。
     使用类方法访问，无需实例化。
     """
-    _parsers: list[object] = {}
+    _parsers: list[object] = []
 
     @classmethod
     def register(cls, parser):

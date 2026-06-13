@@ -23,7 +23,6 @@ _FTS5_STATEMENTS = [
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
         filename,
-        content,
         summary,
         features,
         content='files',
@@ -32,22 +31,22 @@ _FTS5_STATEMENTS = [
     """,
     """
     CREATE TRIGGER IF NOT EXISTS files_ai AFTER INSERT ON files BEGIN
-        INSERT INTO files_fts(rowid, filename, content, summary, features)
-        VALUES (new.id, new.filename, new.content, new.summary, new.features);
+        INSERT INTO files_fts(rowid, filename, summary, features)
+        VALUES (new.id, new.filename, new.summary, new.features);
     END
     """,
     """
     CREATE TRIGGER IF NOT EXISTS files_ad AFTER DELETE ON files BEGIN
-        INSERT INTO files_fts(files_fts, rowid, filename, content, summary, features)
-        VALUES ('delete', old.id, old.filename, old.content, old.summary, old.features);
+        INSERT INTO files_fts(files_fts, rowid, filename, summary, features)
+        VALUES ('delete', old.id, old.filename, old.summary, old.features);
     END
     """,
     """
     CREATE TRIGGER IF NOT EXISTS files_au AFTER UPDATE ON files BEGIN
-        INSERT INTO files_fts(files_fts, rowid, filename, content, summary, features)
-        VALUES ('delete', old.id, old.filename, old.content, old.summary, old.features);
-        INSERT INTO files_fts(rowid, filename, content, summary, features)
-        VALUES (new.id, new.filename, new.content, new.summary, new.features);
+        INSERT INTO files_fts(files_fts, rowid, filename, summary, features)
+        VALUES ('delete', old.id, old.filename, old.summary, old.features);
+        INSERT INTO files_fts(rowid, filename, summary, features)
+        VALUES (new.id, new.filename,  new.summary, new.features);
     END
     """,
 ]
@@ -169,7 +168,6 @@ class IndexManager:
                             filename=result.filename,
                             ext=result.ext,
                             size=result.size,
-                            content=result.content,
                             summary=result.metadata.get("summary", ""),
                             features=json.dumps(result.metadata, ensure_ascii=False),
                             comment="",
@@ -208,11 +206,6 @@ class IndexManager:
             child_results: list[ParseResult],
     ) -> int:
         """整体索引文件夹，返回 folder_id。"""
-        aggregated = "\n\n".join(
-            f"[{r.filename}]\n{(r.content or '')[:500]}"
-            for r in child_results
-            if r.content
-        )
         summary = f"文件夹：{folder_path.name}，共 {len(child_results)} 个文件"
         all_tags = list({tag for r in child_results for tag in r.tags})
         features = json.dumps({
@@ -231,14 +224,12 @@ class IndexManager:
                 folder = File(
                     path=str(folder_path),
                     filename=folder_path.name,
-                    content=aggregated,
                     summary=summary,
                     features=features,
                     modified_at=self._get_mtime(folder_path),
                     is_folder=True,
                 )
             else:
-                folder.content = aggregated
                 folder.summary = summary
                 folder.features = features
                 folder.indexed_at = datetime.now()
@@ -478,7 +469,6 @@ class IndexManager:
                     filename=f.filename,
                     ext=f.ext,
                     size=f.size,
-                    content=f.content,
                     summary=f.summary,
                     features=f.features,
                     comment=f.comment,

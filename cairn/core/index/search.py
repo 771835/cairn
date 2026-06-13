@@ -1,8 +1,8 @@
 # coding=utf-8
 
-from dataclasses import dataclass, field
 from datetime import datetime
 
+from attrs import define, field
 from sqlmodel import Session, select, col, text
 
 from cairn.core.index.models import File, Tag, FileTagLink, FileDTO
@@ -11,7 +11,7 @@ from cairn.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass
+@define(slots=True)
 class SearchQuery:
     """
     结构化搜索请求。
@@ -23,8 +23,8 @@ class SearchQuery:
         SearchQuery(size_min=1024*1024)   # 大于 1MB
     """
     text: str = ""  # 全文检索关键词
-    tags: list[str] = field(default_factory=list)
-    ext: list[str] = field(default_factory=list)
+    tags: list[str] = field(factory=list)
+    ext: list[str] = field(factory=list)
     filename: str = ""  # 文件名模糊匹配
     path_prefix: str = ""  # 路径前缀过滤
     is_folder: bool | None = None  # None=全部，True=只要文件夹
@@ -36,7 +36,7 @@ class SearchQuery:
     offset: int = 0  # 分页
 
 
-@dataclass
+@define(slots=True)
 class SearchResult:
     """单条搜索结果"""
     file: FileDTO
@@ -245,7 +245,7 @@ class SearchEngine:
         file_ids = [f.id for f in files]
         tag_rows = session.exec(
             select(FileTagLink.file_id, Tag.name)
-            .join(Tag, FileTagLink.tag_id == Tag.id)
+            .join(Tag, col(FileTagLink.tag_id) == Tag.id)
             .where(col(FileTagLink.file_id).in_(file_ids))
         ).all()
 
@@ -262,7 +262,6 @@ class SearchEngine:
                 filename=f.filename,
                 ext=f.ext,
                 size=f.size,
-                content=f.content,
                 summary=f.summary,
                 features=f.features,
                 comment=f.comment,

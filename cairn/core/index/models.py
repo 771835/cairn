@@ -1,5 +1,5 @@
 # coding=utf-8
-from dataclasses import dataclass, field
+from attrs import define, field
 from datetime import datetime
 from typing import Optional
 
@@ -46,7 +46,6 @@ class File(SQLModel, table=True):
     filename: str = Field(index=True)
     ext: str = ""
     size: int = 0
-    content: Optional[str] = None
     summary: Optional[str] = None
     features: Optional[str] = None
     comment: str = ""  # 用户注释
@@ -60,7 +59,7 @@ class File(SQLModel, table=True):
     )
 
 
-@dataclass
+@define(slots=True)
 class FileDTO:
     """File 的纯数据传输对象，Session 关闭后安全传递。"""
     id: int
@@ -69,7 +68,6 @@ class FileDTO:
     filename: str
     ext: str
     size: int
-    content: str | None
     summary: str | None
     features: str | None
     comment: str
@@ -78,7 +76,7 @@ class FileDTO:
     file_hash: str | None
     is_folder: bool
     folder_id: int | None
-    tags: list[str] = field(default_factory=list)
+    tags: list[str] = field(factory=list)
 
     @classmethod
     def from_orm(cls, file: File) -> "FileDTO":
@@ -90,7 +88,6 @@ class FileDTO:
             filename=file.filename,
             ext=file.ext,
             size=file.size,
-            content=file.content,
             summary=file.summary,
             features=file.features,
             comment=file.comment,

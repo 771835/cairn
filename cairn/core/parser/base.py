@@ -1,16 +1,15 @@
 # coding=utf-8
-from dataclasses import dataclass, field
+from attrs import define, field
 from pathlib import Path
 
 
-@dataclass
+@define(slots=True)
 class ParseResult:
     """解析结果，规则引擎的唯一输入数据结构"""
     raw_path: Path
-    content: str = ""
-    metadata: dict = field(default_factory=dict)
-    tags: list[str] = field(default_factory=list)
-    links: list[str] = field(default_factory=list)
+    metadata: dict = field(factory=dict)
+    tags: list[str] = field(factory=list)
+    links: list[str] = field(factory=list)
     file_hash: str = ""
 
     @property
