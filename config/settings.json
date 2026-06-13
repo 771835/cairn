@@ -39,5 +39,5 @@
         "disabled": []
     },
     "hotkey": "control+shift+space",
-    "dev_mode": true
+    "dev_mode": false
 }
