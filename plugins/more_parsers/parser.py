@@ -2,7 +2,7 @@
 import re
 from pathlib import Path
 from cairn.core.parser.base import ParseResult
-from cairn.plugins.api import ParserPlugin
+from cairn.plugins.api import BaseParser
 from cairn.plugins.registry import ParserRegistry
 from cairn.utils.logger import get_logger
 
@@ -49,7 +49,7 @@ _LANG_TAG_MAP = {
 }
 
 
-class TextParserPlugin(ParserPlugin):
+class TextParserPlugin(BaseParser):
     name = "text_parser"
     supported_extensions = sorted(_TEXT_EXTENSIONS)
 

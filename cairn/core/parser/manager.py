@@ -2,7 +2,8 @@
 import hashlib
 from pathlib import Path
 
-from cairn.core.parser.base import BaseParser, ParseResult
+from cairn.core.parser.base import ParseResult
+from cairn.plugins.api import BaseParser
 from cairn.plugins.registry import ParserRegistry
 from cairn.utils.logger import get_logger
 

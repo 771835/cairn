@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Final
 
-from cairn.plugins.api import OperatorPlugin
+from cairn.plugins.api import BaseOperator
 from cairn.plugins.registry import OperatorRegistry
 from cairn.utils.logger import get_logger
 
@@ -78,7 +78,7 @@ _TYPE_GROUPS: Final[dict[str, set[str]]] = {
 }
 
 
-class StartsWithOperator(OperatorPlugin):
+class StartsWithOperator(BaseOperator):
     """
     (filepath startswith "E:/知识库")
     字符串前缀匹配，忽略大小写。
@@ -91,7 +91,7 @@ class StartsWithOperator(OperatorPlugin):
         return str(actual).lower().startswith(args[0].lower())
 
 
-class EndsWithOperator(OperatorPlugin):
+class EndsWithOperator(BaseOperator):
     """
     (filename endswith ".bak")
     字符串后缀匹配，忽略大小写。
@@ -104,7 +104,7 @@ class EndsWithOperator(OperatorPlugin):
         return str(actual).lower().endswith(args[0].lower())
 
 
-class MatchesOperator(OperatorPlugin):
+class MatchesOperator(BaseOperator):
     """
     (filename matches "^\\d{8}_")
     完整正则匹配（fullmatch），区别于 `~`（search）。
@@ -122,7 +122,7 @@ class MatchesOperator(OperatorPlugin):
             return False
 
 
-class BeforeOperator(OperatorPlugin):
+class BeforeOperator(BaseOperator):
     """
     (modified before "2024-01-01")
     文件修改时间早于指定日期。
@@ -154,7 +154,7 @@ class BeforeOperator(OperatorPlugin):
         raise ValueError(f"无法解析时间：{v}")
 
 
-class AfterOperator(OperatorPlugin):
+class AfterOperator(BaseOperator):
     """
     (modified after "2024-06-01")
     文件修改时间晚于指定日期，逻辑同 before。
@@ -172,7 +172,7 @@ class AfterOperator(OperatorPlugin):
             return False
 
 
-class TypeOfOperator(OperatorPlugin):
+class TypeOfOperator(BaseOperator):
     """
     (ext typeof "image")
     按文件类型族筛选，避免列举所有扩展名。
@@ -194,7 +194,7 @@ class TypeOfOperator(OperatorPlugin):
         return str(actual).lower().lstrip(".") in group
 
 
-class SizeBetweenOperator(OperatorPlugin):
+class SizeBetweenOperator(BaseOperator):
     """
     (size sizebetween (1mb, 10mb))
     文件大小范围判断（含两端）。

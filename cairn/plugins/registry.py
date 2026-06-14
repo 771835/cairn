@@ -1,4 +1,5 @@
 # coding=utf-8
+from cairn.plugins.api import BaseParser
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -48,10 +49,10 @@ class ParserRegistry:
     负责注册和存储全局的解析器。
     使用类方法访问，无需实例化。
     """
-    _parsers: list[object] = []
+    _parsers: list[BaseParser] = []
 
     @classmethod
-    def register(cls, parser):
+    def register(cls, parser: BaseParser):
         """注册一个解析器"""
         cls._parsers.append(parser)
         logger.debug(f"已注册解析器：{parser.__class__.__name__}")

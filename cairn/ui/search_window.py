@@ -912,7 +912,7 @@ class TimelineTab(QWidget, FileListMixin):
 
     def _remove_dtos_from_view(self, dtos: list[FileDTO]) -> None:
         """移除时间线叶节点，更新分组计数。"""
-        ids = {d.id for d in dtos}
+        ids = {d.id for d in dtos if d}
         root = self._tree.invisibleRootItem()
 
         for g in range(root.childCount()):

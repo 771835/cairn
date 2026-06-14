@@ -190,7 +190,7 @@ class FileListMixin:
         if reply != QMessageBox.StandardButton.Yes:
             return
         for dto in dtos:
-            if dto is None: # 跳过不存在实际文件的条目
+            if dto is None:  # 跳过不存在实际文件的条目
                 continue
             IndexManager().delete(dto.id)
         self._remove_dtos_from_view(dtos)
@@ -206,7 +206,8 @@ class FileListMixin:
         if reply != QMessageBox.StandardButton.Yes:
             return
         for dto in dtos:
-            IndexManager().delete_from_store(dto.id)
+            if dto:
+                IndexManager().delete_from_store(dto.id)
         self._remove_dtos_from_view(dtos)
 
     def _batch_add_tags(self, dtos: list[FileDTO]) -> None:

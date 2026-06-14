@@ -3,14 +3,14 @@ import shutil
 from pathlib import Path
 
 from cairn.core.parser.base import ParseResult
-from cairn.plugins.api import ActionPlugin
+from cairn.plugins.api import BaseAction
 from cairn.plugins.registry import ActionRegistry
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class MoveAction(ActionPlugin):
+class MoveAction(BaseAction):
     name = "move"
     dsl_keyword = "move"
 
@@ -25,7 +25,7 @@ class MoveAction(ActionPlugin):
         result.raw_path = dest
 
 
-class StoreAction(ActionPlugin):
+class StoreAction(BaseAction):
     """store 指令：将文件入库（哈希存储 + 索引写入）"""
     name = "store"
     dsl_keyword = "store"
@@ -58,7 +58,7 @@ class StoreAction(ActionPlugin):
             f"哈希：{file_hash[:12]}... | "
             f"标签：{result.tags}"
         )
-class TagAction(ActionPlugin):
+class TagAction(BaseAction):
     name = "tag"
     dsl_keyword = "tag"
 
@@ -69,7 +69,7 @@ class TagAction(ActionPlugin):
         logger.debug(f"已打标签：{args} → {result.filename}")
 
 
-class IndexAction(ActionPlugin):
+class IndexAction(BaseAction):
     """单独索引，不移动文件（用于已在知识库内的文件）"""
     name = "index"
     dsl_keyword = "index"

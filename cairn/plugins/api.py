@@ -1,24 +1,10 @@
 # coding=utf-8
 from pathlib import Path
+
 from cairn.core.parser.base import ParseResult
 
 
-class ParserPlugin:
-    """
-    文件解析插件基类。
-    将文件内容转化为 ParseResult。
-    """
-    name: str = ""
-    supported_extensions: list[str] = []
-
-    def parse(self, file_path: Path) -> ParseResult:
-        raise NotImplementedError
-
-    def can_handle(self, file_path: Path) -> bool:
-        return file_path.suffix.lower() in self.supported_extensions
-
-
-class ActionPlugin:
+class BaseAction:
     """
     规则动作插件基类。
     """
@@ -36,7 +22,7 @@ class ActionPlugin:
         raise NotImplementedError
 
 
-class OperatorPlugin:
+class BaseOperator:
     """
     自定义操作符插件。
     注册后可在 DSL 过滤器中作为 IDENT 操作符使用。
@@ -54,3 +40,18 @@ class OperatorPlugin:
         list: DSL 中操作符右侧的参数（已转换为 Python 原生类型）
         """
         raise NotImplementedError
+
+
+class BaseParser:
+    """
+    文件解析插件基类。
+    将文件内容转化为 ParseResult。
+    """
+    name: str = ""
+    supported_extensions: list[str] = []
+
+    def parse(self, file_path: Path) -> ParseResult:
+        raise NotImplementedError
+
+    def can_handle(self, file_path: Path) -> bool:
+        return file_path.suffix.lower() in self.supported_extensions

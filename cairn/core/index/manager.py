@@ -12,6 +12,7 @@ from cairn.core.config import config
 from cairn.core.index.models import File, Tag, FileTagLink, FileDTO, HashFile
 from cairn.core.index.search import SearchEngine, SearchQuery, SearchResult
 from cairn.core.parser.base import ParseResult
+from cairn.core.store import FileStore
 from cairn.utils.fmt_tools import normalize_to_platform
 from cairn.utils.logger import get_logger
 
@@ -140,12 +141,11 @@ class IndexManager:
 
                     session.exec(stmt)
 
-
                     # ── 按 origin_path 判断是否已索引过 ──────────
                     _count = 0
                     final_path = origin
                     while True:
-                        _count +=1
+                        _count += 1
                         existing_origin = session.exec(
                             select(File).where(
                                 col(File.origin_path) == final_path
@@ -629,18 +629,16 @@ class IndexManager:
                     f"剩余引用数={ref_count - 1}"
                 )
                 return
-            else: # 引用计数归0
+            else:  # 引用计数归0
                 session.delete(hash_file)
                 session.commit()
 
         # 删除物理文件
         if file_hash and not dev_mode:
-            store_path.unlink(missing_ok=True)
-            try:
-                store_path.parent.rmdir()
-            except OSError:
-                pass
-            logger.info(f"已删除物理文件：{file_hash[:12]}...")
+            if FileStore().remove(file_hash):
+                logger.info(f"已删除物理文件：{file_hash[:12]}...")
+            else:
+                logger.warning(f"物理文件删除失败")
 
     def delete_from_store(
             self,
@@ -660,23 +658,39 @@ class IndexManager:
             session.delete(file)
             session.commit()
 
-        if store_path.exists():
-            store_path.unlink(missing_ok=True)
-            logger.info(f"[DEV] 强制删除物理文件：{file_hash}")
+        if store_path.exists() and file_hash:
+            if FileStore().remove(file_hash):
+                logger.info(f"[DEV] 强制删除物理文件：{file_hash[:12]}...")
+            else:
+                logger.warning(f"[DEV] 物理文件删除失败")
 
-        # 正常模式：检查同哈希引用
+        # 检查同哈希引用
         if file_hash:
             with Session(self._engine) as session:
-                same_hash = session.exec(
-                    select(File).where(File.file_hash == file_hash)
-                ).first()
-                if same_hash is None and store_path.exists():
-                    store_path.unlink(missing_ok=True)
-                    try:
-                        store_path.parent.rmdir()
-                    except OSError:
-                        pass
-                    logger.info(f"已删除物理文件：{file_hash[:12]}...")
+                # 1. 找到所有要删除的 file id
+                files_to_delete = session.exec(
+                    select(File).where(col(File.file_hash) == file_hash)
+                ).all()
+                ids_to_delete = [f.id for f in files_to_delete]
+
+                if ids_to_delete:
+                    # 2. 先删 file_tags 关联记录
+                    session.exec(
+                        delete(FileTagLink).where(col(FileTagLink.file_id).in_(ids_to_delete))
+                    )
+
+                    # 3. 把子文件的 folder_id 一并删除
+                    session.exec(
+                        delete(File)
+                        .where(col(File.folder_id).in_(ids_to_delete))
+                    )
+
+                    # 4. 最后才删 File 本体
+                    session.exec(
+                        delete(File).where(col(File.file_hash) == file_hash)
+                    )
+
+                    session.commit()
 
     # ── 文件恢复 ──────────────────────────────────────────────────
 
@@ -778,11 +792,7 @@ class IndexManager:
         for f in orphans:
             try:
                 size = f.stat().st_size
-                f.unlink()
-                try:
-                    f.parent.rmdir()
-                except OSError:
-                    pass
+                FileStore().remove(f.name)
                 deleted += 1
                 freed += size
             except OSError as e:

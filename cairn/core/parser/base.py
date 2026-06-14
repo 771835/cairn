@@ -27,12 +27,3 @@ class ParseResult:
         return self.raw_path.stat().st_size if self.raw_path.exists() else 0
 
 
-class BaseParser:
-    """所有解析器插件的基类"""
-    supported_extensions: list[str] = []
-
-    def parse(self, file_path: Path) -> ParseResult:
-        raise NotImplementedError
-
-    def can_handle(self, file_path: Path) -> bool:
-        return file_path.suffix.lower() in self.supported_extensions

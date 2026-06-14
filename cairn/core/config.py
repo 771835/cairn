@@ -68,6 +68,7 @@ class AppConfig:
     log_level: str
     log_file: str
     dev_mode: bool
+    safe_mode: bool
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -86,6 +87,7 @@ class AppConfig:
             log_level=raw.get("log_level", "INFO"),
             log_file=raw.get("log_file", "logs/cairn.log"),
             dev_mode=raw.get("dev_mode", False),
+            safe_mode=raw.get("safe_mode", False),
         )
 
 
