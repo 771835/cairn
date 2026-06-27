@@ -11,6 +11,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from sqlmodel import Session, select, col
+
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
 from cairn.core.index.search import SearchQuery, SearchResult
@@ -153,7 +155,7 @@ def cmd_recent(args: argparse.Namespace) -> None:
 def cmd_tags(args: argparse.Namespace) -> None:
     """列出所有标签。"""
     idx = IndexManager()
-    tags = idx.get_all_tags()
+    tags = idx.get_all_tags_and_display_name()
     if not tags:
         print("暂无标签")
         return
@@ -162,16 +164,24 @@ def cmd_tags(args: argparse.Namespace) -> None:
         tags = sorted(tags, key=lambda x: x[0])
 
     print(f"共 {len(tags)} 个标签\n")
-    for name, count in tags:
-        bar = "█" * min(count // max(1, max(c for _, c in tags) // 20), 20)
-        print(f"  #{name:<24} {count:>6}  \033[34m{bar}\033[0m")
+
+    for name, display_name, count in tags:
+        bar = "█" * min(count // max(1, max(c for _, _, c in tags) // 20), 20)
+        print(f"  #{f'{display_name}({name})':<24} {count:>6}  \033[34m{bar}\033[0m")
 
 
 def cmd_tag_files(args: argparse.Namespace) -> None:
     """列出指定标签下的所有文件。"""
     idx = IndexManager()
     files = idx.get_by_tag(args.name)
-    print(f"标签 #{args.name} 下共 {len(files)} 个文件\n")
+
+    # 获取标签的显示名称
+    with Session(idx.engine) as session:
+        from cairn.core.index.models import Tag
+        tag = session.exec(select(Tag).where(col(Tag.name) == args.name)).first()
+        display_name = tag.display_name if tag else args.name  # noqa
+
+    print(f"标签 #{display_name} 下共 {len(files)} 个文件\n")
     _print_files(files)
 
 
@@ -305,7 +315,31 @@ def cmd_tag_edit(args: argparse.Namespace) -> None:
         new_tags = [t for t in f.tags if t not in new_tags]
 
     idx.update_tags(f.id, new_tags)
-    print(f"[OK] {f.filename} 标签已更新：{' '.join('#' + t for t in new_tags)}")
+
+    # 显示更新后的标签（使用显示名称）
+    tag_names = [t for t in new_tags]
+    with Session(idx.engine) as session:
+        from cairn.core.index.models import Tag
+        tags_info = session.exec(
+            select(col(Tag.name), col(Tag.display_name))
+            .where(col(Tag.name).in_(tag_names))
+        ).all()
+
+    display_names = [
+        info[1] or info[0] for info in tags_info
+    ]
+
+    print(f"[OK] {f.filename} 标签已更新：{' '.join('#' + t for t in display_names)}")
+
+
+def cmd_tag_rename(args: argparse.Namespace) -> None:
+    """重命名标签的显示名称。"""
+    idx = IndexManager()
+    success = idx.update_tag_display_name(args.name, args.display_name)
+    if success:
+        print(f"[OK] 标签 #{args.name} 的显示名称已更新为：{args.display_name}")
+    else:
+        print(f"[ERROR] 未找到标签：#{args.name}")
 
 
 def cmd_comment(args: argparse.Namespace) -> None:
@@ -449,6 +483,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_te.add_argument("--add", action="store_true", help="追加标签（不覆盖）")
     p_te.add_argument("--remove", action="store_true", help="移除指定标签")
     p_te.set_defaults(func=cmd_tag_edit)
+
+    # ── tag-rename ─────────────────────────────────────────────
+    p_tr = sub.add_parser("tag-rename", help="重命名标签的显示名称")
+    p_tr.add_argument("name", help="标签名（不含 #）")
+    p_tr.add_argument("display_name", help="新的显示名称")
+    p_tr.set_defaults(func=cmd_tag_rename)
 
     # ── comment ───────────────────────────────────────────────
     p_comment = sub.add_parser("comment", help="编辑文件注释")

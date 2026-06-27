@@ -20,7 +20,7 @@ class Tag(SQLModel, table=True):
 
     id: int = Field(default=None, primary_key=True)  # SQLModel 自动处理 AUTOINCREMENT
     name: str = Field(unique=True, index=True)
-
+    display_name: Optional[str] = Field(default=None)
     files: list["File"] = Relationship(
         back_populates="tags", link_model=FileTagLink
     )

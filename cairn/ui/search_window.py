@@ -57,7 +57,7 @@ class BrowseWorker(QObject):
     """在独立线程中加载浏览数据。"""
 
     folder_tree_ready: Signal = Signal(dict)
-    tag_list_ready: Signal = Signal(list)  # list[(tag, count)]
+    tag_list_ready: Signal = Signal(list)  # list[(tag, display_name, count)]
     tag_files_ready: Signal = Signal(list)  # list[FileDTO]
     timeline_ready: Signal = Signal(dict)  # dict[str, list[FileDTO]]
 
@@ -72,7 +72,7 @@ class BrowseWorker(QObject):
     def load_tags(self) -> None:
         """加载标签列表。"""
         try:
-            tags = IndexManager().get_all_tags()
+            tags = IndexManager().get_all_tags_and_display_name()
             self.tag_list_ready.emit(tags)
         except Exception as e:
             logger.error(f"加载标签列表失败：{e}")
@@ -671,12 +671,13 @@ class TagTab(QWidget, FileListMixin):
         self._worker.tag_list_ready.connect(self._thread.quit)
         self._thread.start()
 
-    def _build_tags(self, tags: list[tuple[str, int]]) -> None:
+    def _build_tags(self, tags: list[tuple[str, str, int]]) -> None:
         """渲染标签列表。"""
         self._tag_list.clear()
-        for name, count in tags:
-            item = QListWidgetItem(f"#{name}  ({count})")
+        for name, display_name, count in tags:
+            item = QListWidgetItem(f"{display_name}  ({count})")
             item.setData(Qt.ItemDataRole.UserRole, name)
+            item.setData(Qt.ItemDataRole.DisplayRole, display_name)
             self._tag_list.addItem(item)
 
     def _on_tag_select(
@@ -941,6 +942,7 @@ class TimelineTab(QWidget, FileListMixin):
             d = current.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(d, FileDTO) and d.id == dto.id:
                 self._detail.setText(format_detail(dto))
+
 
 # ── 主窗口 ────────────────────────────────────────────────────
 

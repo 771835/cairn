@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy import func, desc
 from sqlalchemy.dialects.sqlite import insert
 from sqlmodel import Session, SQLModel, create_engine, select, text, col, update, delete
 
@@ -321,6 +322,16 @@ class IndexManager:
         with Session(self._engine) as session:
             self._sync_tags(session, file_id, tags)
 
+    def update_tag_display_name(self, tag_name: str, display_name: str) -> bool:
+        """更新标签的显示名称。"""
+        with Session(self.engine) as session:
+            tag = session.exec(select(Tag).where(Tag.name == tag_name)).first()
+            if not tag:
+                return False
+            tag.display_name = display_name
+            session.commit()
+        return True
+
     def update_file_meta(
             self,
             file_id: int,
@@ -493,6 +504,33 @@ class IndexManager:
                 ORDER BY cnt DESC
             """)).fetchall()
             return [(row[0], row[1]) for row in rows]
+
+    def get_all_tags_and_display_name(self):
+        """返回 [(name, display_name, count), ...] 按使用频率排序"""
+        with Session(self._engine) as session:
+            # 编写查询：选择 name, display_name, 以及统计关联的文件数量
+            statement = (
+                select(
+                    Tag.name,
+                    Tag.display_name,
+                    func.count(FileTagLink.file_id).label("cnt")
+                )
+                .join(FileTagLink)  # 默认是 INNER JOIN
+                .group_by(Tag.id)  # 按 ID 分组更安全
+                .order_by(desc("cnt"))
+            )
+
+            results = session.exec(statement).all()
+
+            # 返回结果处理：如果 display_name 为空，可以用 name 填充
+            return [
+                (
+                    row[0],  # name
+                    row[1] or row[0],  # display_name，带回退机制
+                    row[2]  # count
+                )
+                for row in results
+            ]
 
     @staticmethod
     def get_store_path(file_hash: str | None) -> Path | None:
@@ -897,6 +935,12 @@ class IndexManager:
             ("files", "comment", "TEXT NOT NULL DEFAULT ''"),
         ]
         with self._engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE tags ADD COLUMN display_name VARCHAR;"))
+                conn.execute(text("UPDATE tags SET display_name = name WHERE display_name IS NULL;"))
+                conn.commit()
+            except Exception as e:
+                pass
             for table, column, definition in migrations:
                 existing = {c["name"] for c in inspector.get_columns(table)}
                 if column not in existing:
