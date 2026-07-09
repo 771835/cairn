@@ -15,7 +15,6 @@ from cairn.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-
 class FileEventDispatcher(QObject):
     process_done = Signal(str)
     process_error = Signal(str)

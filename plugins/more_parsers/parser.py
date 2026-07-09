@@ -1,6 +1,7 @@
 # coding=utf-8
 import re
 from pathlib import Path
+
 from cairn.core.parser.base import ParseResult
 from cairn.plugins.api import BaseParser
 from cairn.plugins.registry import ParserRegistry
@@ -189,4 +190,3 @@ class MoreParsersPlugin:
     def load(self):
         # 注册解析器
         ParserRegistry.register(TextParserPlugin())
-

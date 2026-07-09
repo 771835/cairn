@@ -939,7 +939,7 @@ class IndexManager:
                 conn.execute(text("ALTER TABLE tags ADD COLUMN display_name VARCHAR;"))
                 conn.execute(text("UPDATE tags SET display_name = name WHERE display_name IS NULL;"))
                 conn.commit()
-            except Exception as e:
+            except Exception:
                 pass
             for table, column, definition in migrations:
                 existing = {c["name"] for c in inspector.get_columns(table)}

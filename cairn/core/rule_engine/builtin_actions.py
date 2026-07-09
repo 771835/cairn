@@ -58,6 +58,8 @@ class StoreAction(BaseAction):
             f"哈希：{file_hash[:12]}... | "
             f"标签：{result.tags}"
         )
+
+
 class TagAction(BaseAction):
     name = "tag"
     dsl_keyword = "tag"

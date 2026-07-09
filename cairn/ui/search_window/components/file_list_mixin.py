@@ -3,15 +3,15 @@
 from pathlib import Path
 
 from PySide6.QtCore import QPoint
+from PySide6.QtGui import QCursor
 from PySide6.QtWidgets import (
     QFileDialog, QMenu, QMessageBox, QDialog,
 )
-from PySide6.QtGui import QCursor
 
 from cairn.core.config import config
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
-from cairn.ui.file_context_menu import FileContextMenu
+from cairn.ui.search_window.components.file_context_menu import FileContextMenu
 from cairn.ui.widgets import TagEditorDialog
 from cairn.utils.logger import get_logger
 

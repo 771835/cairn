@@ -138,7 +138,6 @@ class SearchEngine:
             # ── Step 3：组装结果 ───────────────────────────────────
             results = self._batch_to_dto(session, files, fts_data)
 
-
             if query.text:
                 # FTS5 命中的按相关度排前面，LIKE 兜底的排后面（score=0.0）
                 results.sort(key=lambda r: (r.score == 0.0, r.score))

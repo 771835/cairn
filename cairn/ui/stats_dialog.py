@@ -19,18 +19,17 @@ from cairn.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-
 def get_folder_size_blocks(path, block_size=4096):
     """计算目录占用的实际磁盘块数（考虑文件系统块大小）"""
     total_blocks = 0
-    for dirpath, dirnames, filenames in os.walk(path):
+    for dirpath, dir_names, filenames in os.walk(path):
         # 计算目录本身占用的块数
         dir_stat = os.stat(dirpath)
         total_blocks += (dir_stat.st_size + block_size - 1) // block_size
 
         # 计算文件占用的块数
         for filename in filenames:
-            filepath = os.path.join(dirpath, filename) # noqa
+            filepath = os.path.join(dirpath, filename)  # noqa
             try:
                 file_stat = os.stat(filepath)
                 # 计算文件占用的块数（向上取整）
@@ -146,8 +145,6 @@ class StatsWorker(QObject):
                     if recent.indexed_at is not None
                     else "—"
                 )
-
-
 
         return data
 

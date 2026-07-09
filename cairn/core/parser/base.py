@@ -1,6 +1,7 @@
 # coding=utf-8
-from attrs import define, field
 from pathlib import Path
+
+from attrs import define, field
 
 
 @define(slots=True)
@@ -25,5 +26,3 @@ class ParseResult:
     @property
     def size(self) -> int:
         return self.raw_path.stat().st_size if self.raw_path.exists() else 0
-
-

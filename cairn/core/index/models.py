@@ -1,8 +1,8 @@
 # coding=utf-8
-from attrs import define, field
 from datetime import datetime
 from typing import Optional
 
+from attrs import define, field
 from sqlalchemy import UniqueConstraint
 from sqlmodel import SQLModel, Field, Relationship
 

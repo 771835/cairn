@@ -4,6 +4,7 @@ from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class OperatorRegistry:
     """
     操作注册表
@@ -18,11 +19,11 @@ class OperatorRegistry:
         cls._operators[operator.dsl_keyword] = operator
         logger.debug(f"已注册操作：{operator.name}")
 
-
     @classmethod
     def get(cls, key: str):
         """按key获取操作，不存在返回 None"""
         return cls._operators.get(key, None)
+
 
 class ActionRegistry:
     """
@@ -42,6 +43,7 @@ class ActionRegistry:
     def get(cls, key: str):
         """按key获取行动，不存在返回 None"""
         return cls._actions.get(key, None)
+
 
 class ParserRegistry:
     """

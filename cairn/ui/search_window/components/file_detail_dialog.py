@@ -74,6 +74,7 @@ def _read_text_preview(path: Path, max_chars: int = 4000) -> str | None:
         logger.debug(f"内容预览读取失败：{e}")
         return None
 
+
 def _to_qdatetime(dt: datetime | None) -> QDateTime:
     """将 Python datetime 转为 QDateTime。"""
     if dt is None:
@@ -285,7 +286,7 @@ class FileDetailDialog(QDialog):
         if not file_path.exists():
             return None
 
-        return _read_text_preview(file_path, max_chars=4000)
+        return _read_text_preview(file_path)
 
     def _build_metadata_section(self, metadata: dict) -> QFormLayout:
         """构建 metadata 键值对展示区。"""

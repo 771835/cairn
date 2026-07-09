@@ -1,7 +1,9 @@
 # coding=utf-8
 import time
 from collections import defaultdict
+
 from PySide6.QtCore import QObject, QTimer, Signal
+
 from cairn.core.config import config
 from cairn.utils.logger import get_logger
 

@@ -7,14 +7,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
 from PySide6.QtWidgets import QMenu, QWidget, QApplication, QDialog, QVBoxLayout, QTextEdit, \
     QDialogButtonBox
 
 from cairn.core.config import config
 from cairn.core.index.manager import IndexManager
 from cairn.core.index.models import FileDTO
-from cairn.ui.file_detail_dialog import FileDetailDialog
-
+from cairn.ui.search_window.components.file_detail_dialog import FileDetailDialog
 from cairn.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -168,17 +168,17 @@ class FileContextMenu(QMenu):
 
     def _notify_deleted(self) -> None:
         """通知父视图移除当前条目。"""
-        from cairn.ui.file_list_mixin import FileListMixin
+        from cairn.ui.search_window.components.file_list_mixin import FileListMixin
         if isinstance(self._parent, FileListMixin):
-            self._parent._remove_dtos_from_view([self._dto]) # NOQA
+            self._parent._remove_dtos_from_view([self._dto])  # NOQA
         elif hasattr(self._parent, "refresh"):
             self._parent.refresh()
 
     def _notify_updated(self) -> None:
         """通知父视图条目数据已更新。"""
-        from cairn.ui.file_list_mixin import FileListMixin
+        from cairn.ui.search_window.components.file_list_mixin import FileListMixin
         if isinstance(self._parent, FileListMixin):
-            self._parent._on_item_updated(self._dto) # NOQA
+            self._parent._on_item_updated(self._dto)  # NOQA
 
 
 class CommentDialog(QDialog):
