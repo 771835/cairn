@@ -72,7 +72,8 @@ plugins/
 
 # 如何还原强行文件
 
-若项目本体无法加载及还原文件，请尝试使用 [cairn_restore脚本](/cairn_restore.py) 恢复，该脚本不依赖其他项目部分，仅需要 `Python 3.10+`
+若项目本体无法加载及还原文件，请尝试使用 [cairn_restore脚本](/cairn_restore.py) 恢复，该脚本不依赖其他项目部分，仅需要
+`Python 3.10+`
 
 ## 许可证
 

@@ -1,12 +1,12 @@
 # coding=utf-8
 from pathlib import Path
 
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel
 )
-from PySide6.QtGui import QPainter, QColor
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint
 
 from cairn.core.config import config
 

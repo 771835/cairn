@@ -2,10 +2,10 @@
 
 import os
 import re
-from attrs import define, field
 from datetime import datetime
 from pathlib import Path
 
+from attrs import define, field
 from lark import Lark, Transformer, Token
 
 from cairn.utils.logger import get_logger
@@ -289,7 +289,7 @@ def _to_num(v) -> float:
 
 class DSLParser:
     def __init__(self):
-        self._lark = Lark(NXS_GRAMMAR, parser="earley", ambiguity="resolve")
+        self._lark = Lark(NXS_GRAMMAR, parser="earley")
         self._transformer = NXSTransformer()
 
     def parse_file(self, path: Path) -> list[Rule]:

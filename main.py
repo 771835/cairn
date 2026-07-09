@@ -9,8 +9,8 @@ from cairn.core.dispatcher import FileEventDispatcher
 from cairn.core.rule_engine.builtin_actions import register_builtin_actions
 from cairn.core.rule_engine.builtin_operators import register_builtin_operators
 from cairn.plugins.loader import PluginLoader
-from cairn.ui.overlay import DropOverlay
 from cairn.ui.folder_popup import FolderBatchChoicePopup
+from cairn.ui.overlay import DropOverlay
 from cairn.ui.tray import CairnTray
 from cairn.utils.logger import get_logger
 
@@ -37,7 +37,6 @@ def main():
     overlay.files_dropped.connect(dispatcher.dispatch)
     overlay.folders_dropped.connect(popup.popup)
 
-
     def on_folder_choice(folders: list[Path], mode: str):
         for folder in folders:
             if mode == "expand":
@@ -51,10 +50,9 @@ def main():
     dispatcher.process_done.connect(tray.notifier.on_done)
     dispatcher.process_error.connect(tray.notifier.on_error)
 
-
     if "--debug-window" in sys.argv:
         # 调试模式：窗口不置顶，不透明
-        from cairn.ui.search_window import SearchWindow
+        from cairn.ui.search_window.main_window import SearchWindow
         # 开启搜索窗口调试选项
         SearchWindow.debug = True
 

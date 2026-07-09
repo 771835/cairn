@@ -22,7 +22,7 @@ from cairn.core.index.search import SearchQuery, SearchResult
 
 def _fmt_size(size: int) -> str:
     """字节数格式化。"""
-    for unit, t in [("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)]:
+    for unit, t in [("TB", 1024 ** 3), ("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)]:
         if size >= t:
             return f"{size / t:.1f}{unit}"
     return f"{size}B"

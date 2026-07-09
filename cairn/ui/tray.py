@@ -1,9 +1,8 @@
 # coding=utf-8
 import global_hotkeys as hotkey
-
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QSystemTrayIcon, QMenu
 
 from cairn.core.config import config
 from cairn.ui.notifier import BatchNotifier

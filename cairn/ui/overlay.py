@@ -1,12 +1,13 @@
 # coding=utf-8
 from pathlib import Path
 
-from PySide6.QtWidgets import QWidget, QApplication
-from PySide6.QtGui import QColor, QPainter
 from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QWidget, QApplication
 
-from cairn.utils.logger import get_logger
 from cairn.core.config import config
+from cairn.utils.logger import get_logger
+
 logger = get_logger(__name__)
 
 
